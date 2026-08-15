@@ -113,10 +113,37 @@ Three pieces, three places:
 | Piece | Host | Trigger |
 |---|---|---|
 | Web app (PWA) | Firebase Hosting | `npm run deploy:hosting`, or push to `main` |
+| Web app (mirror) | Vercel (`vercel.json`) | push to `main` |
 | Firestore rules + indexes | Firebase | `npm run deploy:rules` (manual, on purpose) |
 | API | Render (`render.yaml`) | push to `main` — `autoDeploy: true` |
 
 **Live:** https://intern-project-38829.web.app · project `intern-project-38829`
+
+### Vercel
+
+Set the project's **Root Directory to the repo root** (`./`). Two things break
+otherwise: `vercel.json` is only read from the root directory, and npm cannot
+resolve the `@internlink/*` workspace dependencies from inside `apps/web`.
+
+`vercel.json` pins `buildCommand` to `npm run build:web` for a reason worth
+knowing. Vite loads `.env.production` from its own working directory, and that
+file lives in `apps/web` — running the build through the workspace flag puts cwd
+there, which is what gets `VITE_FIREBASE_*` inlined into the bundle. A build
+started anywhere else produces an app that renders "Firebase is not configured"
+at runtime, because those values are baked in at build time and nothing can
+supply them afterwards.
+
+Belt and braces: the same `VITE_*` values can also be set as Vercel environment
+variables. Vite gives `process.env` precedence over env files, so dashboard
+values win regardless of where the build runs.
+
+Two things must then list the Vercel domain, or the app loads and immediately
+fails:
+
+- **Firebase Console → Authentication → Settings → Authorized domains.** Without
+  it, sign-in is refused with `auth/unauthorized-domain`.
+- **`CORS_ORIGINS` on Render.** The browser is cross-origin against the API, so
+  every call is blocked until the origin is listed.
 
 Firestore rules and indexes are deployed and the database is created. Rules
 deploy is kept off the automatic path deliberately: a bad ruleset locks every
