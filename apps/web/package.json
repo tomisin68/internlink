@@ -8,6 +8,7 @@
     "dev": "vite",
     "prebuild": "npm run build -w @internlink/shared-types && npm run build -w @internlink/design-tokens",
     "build": "tsc --noEmit && vite build",
+    "build:web": "npm run build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "icons": "node scripts/generate-icons.mjs"

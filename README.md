@@ -180,6 +180,16 @@ Belt and braces: the same `VITE_*` values can also be set as Vercel environment
 variables. Vite gives `process.env` precedence over env files, so dashboard
 values win regardless of where the build runs.
 
+`build:web` is deliberately defined **twice** — in the root `package.json` and
+again in `apps/web/package.json`, where it is just an alias for `build`. Vercel
+installs at the lockfile root but runs the build command scoped to the
+`apps/web` workspace, so `npm run build:web` resolves against that workspace's
+scripts and fails with *Missing script: "build:web"* if only the root defines
+it. CI and the Firebase Hosting predeploy run the same command from the root
+with no workspace filter, which is why they stay green while Vercel breaks. The
+alias makes the command resolve identically from either side; delete it and the
+Vercel build fails while nothing else does.
+
 Note that `vercel.json` cannot carry comments. JSON has none, and Vercel
 validates the file against a strict schema that rejects any unrecognised key —
 including a `"//"` used as one, which fails the build with *should NOT have
