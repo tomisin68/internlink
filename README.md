@@ -180,6 +180,26 @@ Belt and braces: the same `VITE_*` values can also be set as Vercel environment
 variables. Vite gives `process.env` precedence over env files, so dashboard
 values win regardless of where the build runs.
 
+Note that `vercel.json` cannot carry comments. JSON has none, and Vercel
+validates the file against a strict schema that rejects any unrecognised key —
+including a `"//"` used as one, which fails the build with *should NOT have
+additional property `//`*. Anything worth explaining belongs here instead.
+
+Two entries in that file are load-bearing and easy to break:
+
+- **The `/p/:postId` rewrite must precede the SPA fallback** — rewrites match in
+  order. It points at the API rather than the app because WhatsApp, Twitter and
+  Slack fetch a shared URL and read its `<head>` without running JavaScript, so
+  an SPA that sets its meta tags after mount unfurls as a blank card. The API
+  returns real HTML with the post's own title and media, then bounces human
+  visitors into the app.
+- **`/sw.js` is served `no-store`.** Cache the service worker and users are
+  stuck on an old build indefinitely. Hashed `/assets/*` filenames are immutable
+  and cached hard for the opposite reason.
+
+`Strict-Transport-Security` is deliberately sent without `preload` until the
+domain is settled — preloading is very hard to undo.
+
 Two things must then list the Vercel domain, or the app loads and immediately
 fails:
 

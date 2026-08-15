@@ -1,20 +1,4 @@
 {
-  "//": [
-    "Vercel build for the web app. This file must sit in the directory Vercel is",
-    "configured to use as the project Root Directory — set that to the REPO ROOT",
-    "(./), not apps/web, or npm cannot resolve the @internlink/* workspace deps.",
-    "",
-    "Pinning buildCommand matters more than it looks. Vite loads .env.production",
-    "from its own working directory, and that file lives in apps/web. Running the",
-    "build through the workspace flag sets cwd to apps/web, which is what makes",
-    "the VITE_FIREBASE_* values get inlined into the bundle. A build started from",
-    "the repo root instead produces an app that renders 'Firebase is not",
-    "configured' at runtime, because those values are baked in at build time and",
-    "there is no way to supply them afterwards.",
-    "",
-    "npm run build:web already builds shared-types and design-tokens first via the",
-    "prebuild hook in apps/web/package.json, so it is self-contained."
-  ],
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "npm run build:web",
   "outputDirectory": "apps/web/dist",
@@ -22,34 +6,20 @@
   "framework": "vite",
   "rewrites": [
     {
-      "//": [
-        "Post permalinks are served by the API, not the SPA.",
-        "",
-        "WhatsApp, Twitter and Slack fetch a shared URL and read its <head>.",
-        "None of them run JavaScript, so an SPA that sets its meta tags after",
-        "mount unfurls as a blank card with the app's generic title. The API",
-        "returns real HTML with the post's own title and media, then bounces a",
-        "human visitor into the app.",
-        "",
-        "Must precede the SPA fallback below — rewrites are matched in order."
-      ],
       "source": "/p/:postId",
       "destination": "https://internlink-2g0u.onrender.com/p/:postId"
     },
     {
-      "//": "SPA fallback, mirroring firebase.json. Static files are matched before rewrites, so this only catches client routes like /feed or /u/:id. The client calls the Render API on its absolute URL (VITE_API_BASE_URL), so nothing is proxied here.",
       "source": "/(.*)",
       "destination": "/index.html"
     }
   ],
   "headers": [
     {
-      "//": "Hashed asset filenames are immutable, so cache them hard.",
       "source": "/assets/(.*)",
       "headers": [{ "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }]
     },
     {
-      "//": "The service worker must never be cached, or users get stuck on an old build forever.",
       "source": "/sw.js",
       "headers": [{ "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }]
     },
@@ -64,7 +34,6 @@
         { "key": "X-Frame-Options", "value": "SAMEORIGIN" },
         { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
         {
-          "//": "§5.2 — HTTPS only. Not preloaded until the domain is settled; preload is very hard to undo.",
           "key": "Strict-Transport-Security",
           "value": "max-age=31536000; includeSubDomains"
         },
