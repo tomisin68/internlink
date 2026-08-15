@@ -164,17 +164,22 @@ Three pieces, three places:
 
 ### Vercel
 
-Set the project's **Root Directory to the repo root** (`./`). Two things break
-otherwise: `vercel.json` is only read from the root directory, and npm cannot
-resolve the `@internlink/*` workspace dependencies from inside `apps/web`.
+The project's **Root Directory is `apps/web`**, and the config file that governs
+the deploy is **`apps/web/vercel.json`** — not one at the repo root. Vercel reads
+`vercel.json` from the Root Directory and ignores it everywhere else. A root
+`vercel.json` is still schema-validated by the Git integration, so a malformed
+one fails the deploy while a well-formed one is silently never applied: the
+worst of both. Keep the file next to the app it configures.
 
-`vercel.json` pins `buildCommand` to `npm run build:web` for a reason worth
-knowing. Vite loads `.env.production` from its own working directory, and that
-file lives in `apps/web` — running the build through the workspace flag puts cwd
-there, which is what gets `VITE_FIREBASE_*` inlined into the bundle. A build
-started anywhere else produces an app that renders "Firebase is not configured"
-at runtime, because those values are baked in at build time and nothing can
-supply them afterwards.
+Workspace dependencies resolve fine from there. Vercel detects npm workspaces,
+installs at the lockfile root, and builds the selected package, so every
+`@internlink/*` dep is present.
+
+Vite loads `.env.production` from its own working directory, and that file lives
+in `apps/web`. The build must therefore run with cwd there or `VITE_FIREBASE_*`
+is not inlined and the app renders "Firebase is not configured" at runtime —
+those values are baked in at build time and nothing can supply them afterwards.
+The Root Directory setting puts cwd in the right place.
 
 Belt and braces: the same `VITE_*` values can also be set as Vercel environment
 variables. Vite gives `process.env` precedence over env files, so dashboard
@@ -194,6 +199,12 @@ Note that `vercel.json` cannot carry comments. JSON has none, and Vercel
 validates the file against a strict schema that rejects any unrecognised key —
 including a `"//"` used as one, which fails the build with *should NOT have
 additional property `//`*. Anything worth explaining belongs here instead.
+
+Paths in `apps/web/vercel.json` are relative to the Root Directory, so
+`outputDirectory` is `dist`, not `apps/web/dist`. Firebase Hosting is configured
+from the repo root and so uses the longer form in `firebase.json` — the same
+directory, written two ways, because the two hosts resolve from different
+places.
 
 Two entries in that file are load-bearing and easy to break:
 
