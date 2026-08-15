@@ -138,6 +138,15 @@ export function mapFirebaseAuthError(error: unknown): {
   message: string;
   fields?: FieldErrors;
 } {
+  if (error instanceof ApiRequestError) {
+    const suffix = error.requestId ? ` Reference: ${error.requestId}` : '';
+    return { message: `${error.message}${suffix}`, fields: error.fields };
+  }
+
+  if (error instanceof NetworkError) {
+    return { message: error.message };
+  }
+
   const code = (error as { code?: string }).code ?? '';
 
   switch (code) {
