@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { z } from 'zod';
 import {
   CreateInternProfileSchema,
   CreateRecruiterProfileSchema,
@@ -11,12 +12,15 @@ import { asyncHandler, param } from '../../lib/async-handler.js';
 import { sendCreated, sendOk } from '../../lib/respond.js';
 import { notFound, unauthenticated } from '../../lib/errors.js';
 import { requireAuth } from '../../middleware/auth.js';
-import { validate } from '../../middleware/validate.js';
+import { validate, validated } from '../../middleware/validate.js';
 import { writeLimiter } from '../../middleware/rate-limit.js';
 import * as profilesService from './profiles.service.js';
 import * as companiesService from '../companies/companies.service.js';
 import * as people from '../connections/people.service.js';
 import { getAccount } from '../auth/auth.service.js';
+import { connectedIds, followCounts } from '../connections/connections.service.js';
+import { Collections, db } from '../../config/firebase.js';
+import { listProfileViewers, recordProfileView } from './profile-views.service.js';
 
 export const profilesRouter = Router();
 
@@ -78,6 +82,55 @@ profilesRouter.get(
   }),
 );
 
+/**
+ * GET /v1/profiles/me/stats — the numbers on your own profile header.
+ *
+ * The public profile route has carried these since it was written; your own
+ * screen was the one place that could not see them, because it renders from the
+ * session payload rather than from a profile fetch. Rather than bloat the
+ * session with counts that change constantly, this is its own small read.
+ */
+profilesRouter.get(
+  '/me/stats',
+  asyncHandler(async (req, res) => {
+    if (!req.auth) throw unauthenticated();
+    const { accountId } = req.auth;
+
+    const [counts, connections, postCount, account] = await Promise.all([
+      followCounts(accountId),
+      connectedIds(accountId),
+      db().collection(Collections.posts).where('authorAccountId', '==', accountId).count().get(),
+      getAccount(accountId),
+    ]);
+
+    sendOk(res, {
+      followers: counts.followers,
+      following: counts.following,
+      connections: connections.length,
+      posts: postCount.data().count,
+      joinedAt: account?.createdAt ?? null,
+    });
+  }),
+);
+
+/**
+ * GET /v1/profiles/me/views — FR-1001, who looked at your profile.
+ *
+ * Deliberately `me`-only. A route that let anyone read anyone's viewer list
+ * would turn a mild vanity feature into a surveillance one.
+ */
+const ViewsQuery = z.object({ limit: z.coerce.number().int().min(1).max(50).default(20) });
+
+profilesRouter.get(
+  '/me/views',
+  validate(ViewsQuery, 'query'),
+  asyncHandler(async (req, res) => {
+    if (!req.auth) throw unauthenticated();
+    const { limit } = validated<typeof ViewsQuery>(req, 'query');
+    sendOk(res, await listProfileViewers(req.auth.accountId, limit));
+  }),
+);
+
 /** POST /v1/profiles/recruiter — creates company + recruiter profile together. */
 profilesRouter.post(
   '/recruiter',
@@ -115,13 +168,19 @@ profilesRouter.get(
   '/:accountId',
   asyncHandler(async (req, res) => {
     if (!req.auth) throw unauthenticated();
-    sendOk(
-      res,
-      await people.getPublicProfile(
-        req.auth.accountId,
-        req.auth.activeRole,
-        param(req, 'accountId'),
-      ),
+    const subjectId = param(req, 'accountId');
+
+    const profile = await people.getPublicProfile(
+      req.auth.accountId,
+      req.auth.activeRole,
+      subjectId,
     );
+
+    // Detached and after the read succeeded: recording a view must never be
+    // able to slow down or fail the thing the visitor actually asked for, and
+    // a view of a profile that 404'd is not a view.
+    void recordProfileView(req.auth.accountId, subjectId);
+
+    sendOk(res, profile);
   }),
 );

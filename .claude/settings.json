@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node -e \"console.log\\('firebase-admin', require\\('./apps/backend/api/node_modules/firebase-admin/package.json'\\).version\\)\")",
+      "Bash(node -e \"console.log\\('firebase-admin', require\\('firebase-admin/package.json'\\).version\\)\")",
+      "Bash(node -e \"JSON.parse\\(require\\('fs'\\).readFileSync\\('vercel.json','utf8'\\)\\); console.log\\('vercel.json is valid JSON'\\)\")",
+      "Bash(grep -n \"^      \\)}$\" apps/web/src/features/profile/public-profile-screen.tsx)",
+      "Bash(node -e \"JSON.parse\\(require\\('fs'\\).readFileSync\\('vercel.json','utf8'\\)\\);console.log\\('vercel.json valid'\\)\")",
+      "Bash(grep -v \"^$\")",
+      "Bash(node -e \"JSON.parse\\(require\\('fs'\\).readFileSync\\('firestore.indexes.json','utf8'\\)\\);console.log\\('indexes valid'\\)\")",
+      "Bash(node -e \"const y=require\\('fs'\\).readFileSync\\('render.yaml','utf8'\\);console.log\\('render.yaml lines:',y.split\\('\\\\n'\\).length\\)\")"
+    ]
+  }
+}

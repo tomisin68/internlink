@@ -2,8 +2,12 @@ import { Router } from 'express';
 import { z } from 'zod';
 import {
   ListingStatusSchema,
+  MAX_POST_MEDIA,
+  MAX_POST_TAGS,
   PageQuerySchema,
+  PostMediaSchema,
   WorkModeSchema,
+  extractHashtags,
   type Listing,
   type PageQuery,
 } from '@internlink/shared-types';
@@ -25,6 +29,10 @@ const CreateListingSchema = z.object({
   title: z.string().trim().min(4, 'Give the role a title').max(160),
   description: z.string().trim().min(80, 'Describe the role in a little more detail').max(12000),
   skills: z.array(z.string().trim().min(1).max(48)).min(1, 'Add at least one skill').max(20),
+  /** FR-303 — a role post carries photos and video like any other post. */
+  media: z.array(PostMediaSchema).max(MAX_POST_MEDIA).default([]),
+  /** Explicit hashtags; anything typed `#like-this` in the body is merged in. */
+  tags: z.array(z.string().trim().min(1).max(48)).max(MAX_POST_TAGS).default([]),
   location: z.string().trim().max(120).nullable().optional(),
   workMode: WorkModeSchema,
   durationMonths: z.number().int().min(1).max(36).nullable().optional(),
@@ -140,11 +148,23 @@ listingsRouter.post(
     }
 
     const ts = nowIso();
+    // Hashtags typed into the description count as tags. Someone writing
+    // "#remote" in the body plainly means it as a topic, and making them retype
+    // it into a separate field is the kind of duplication people just skip.
+    const tags = [
+      ...new Set([
+        ...input.tags.map((tag) => tag.replace(/^#/, '').toLowerCase()),
+        ...extractHashtags(`${input.title} ${input.description}`),
+      ]),
+    ].slice(0, MAX_POST_TAGS);
+
     const doc: Omit<Listing, 'id'> = {
       companyId: recruiter.companyId,
       title: input.title,
       description: input.description,
       skills: input.skills,
+      media: input.media,
+      tags,
       location: input.location ?? null,
       workMode: input.workMode,
       durationMonths: input.durationMonths ?? null,

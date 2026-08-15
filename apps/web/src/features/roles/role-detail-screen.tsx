@@ -15,6 +15,8 @@ import {
 import { Avatar } from '@/components/ui/avatar';
 import { Button, IconButton } from '@/components/ui/button';
 import { Alert } from '@/components/ui/feedback';
+import { MediaCarousel } from '@/components/ui/media-carousel';
+import { HashtagList } from '@/components/ui/rich-text';
 import { relativeTime } from '@/lib/format';
 import {
   applicationsApi,
@@ -151,6 +153,12 @@ export function RoleDetailScreen() {
           </div>
         )}
 
+        {/* FR-303 — a role post carries media. A photo of the team or the
+            office does more for applications than another paragraph. */}
+        {(listing.media?.length ?? 0) > 0 && (
+          <MediaCarousel media={listing.media} className="mt-5" />
+        )}
+
         {listing.skills.length > 0 && (
           <section className="mt-5">
             <h2 className="mb-2 text-sm font-semibold text-fg">Skills they are looking for</h2>
@@ -173,6 +181,8 @@ export function RoleDetailScreen() {
             {listing.description}
           </p>
         </section>
+
+        <HashtagList tags={listing.tags ?? []} className="mt-5" />
 
         {listing.publishedAt && (
           <p className="mt-5 text-xs text-fg-faint">Posted {relativeTime(listing.publishedAt)}</p>

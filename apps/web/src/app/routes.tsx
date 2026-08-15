@@ -82,6 +82,21 @@ const PublicProfileScreen = lazy(() =>
 const PostScreen = lazy(() =>
   import('@/features/feed/post-screen').then((m) => ({ default: m.PostScreen })),
 );
+const TagScreen = lazy(() =>
+  import('@/features/feed/tag-screen').then((m) => ({ default: m.TagScreen })),
+);
+const SearchScreen = lazy(() =>
+  import('@/features/search/search-screen').then((m) => ({ default: m.SearchScreen })),
+);
+const CompaniesScreen = lazy(() =>
+  import('@/features/companies/companies-screen').then((m) => ({ default: m.CompaniesScreen })),
+);
+const CompanyScreen = lazy(() =>
+  import('@/features/companies/company-screen').then((m) => ({ default: m.CompanyScreen })),
+);
+const ModerationScreen = lazy(() =>
+  import('@/features/admin/moderation-screen').then((m) => ({ default: m.ModerationScreen })),
+);
 const NotificationsScreen = lazy(() =>
   import('@/features/notifications/notifications-screen').then((m) => ({
     default: m.NotificationsScreen,
@@ -183,6 +198,12 @@ export function AppRoutes() {
 
           <Route path="/applications" element={<ApplicationsScreen />} />
           <Route path="/network" element={<NetworkScreen />} />
+          {/* FR-1006 — one box across people, companies, posts and tags. The
+              term lives in the query string so a search is shareable. */}
+          <Route path="/search" element={<SearchScreen />} />
+          {/* A hashtag page. Short prefix for the same reason `/u/` and `/p/`
+              are short: these get pasted into chats. */}
+          <Route path="/tag/:tag" element={<TagScreen />} />
           <Route path="/notifications" element={<NotificationsScreen />} />
           <Route path="/profile" element={<ProfileScreen />} />
           {/* Somebody else's profile. Short prefix because it is the most
@@ -194,6 +215,15 @@ export function AppRoutes() {
               working forever. On Vercel the same path is served by the API's
               share endpoint first, for the Open Graph preview. */}
           <Route path="/p/:postId" element={<PostScreen />} />
+
+          {/* FR-1008 — company pages. `/c/` matches the brevity of `/u/` and
+              `/p/`, since these get shared the same way. */}
+          <Route path="/companies" element={<CompaniesScreen />} />
+          <Route path="/c/:companyId" element={<CompanyScreen />} />
+
+          {/* §9.3 — staff only. The screen redirects a non-admin, but the API
+              is what actually enforces it; hiding a route is not access control. */}
+          <Route path="/admin/moderation" element={<ModerationScreen />} />
         </Route>
 
         {/* Unbuilt routes referenced by links elsewhere resolve to the root

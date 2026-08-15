@@ -76,6 +76,16 @@ export const MessageSchema = z.object({
   threadId: IdSchema,
   senderId: IdSchema,
   body: z.string().max(4000),
+  /**
+   * People tagged in the body — see `MentionSchema` in social.ts.
+   *
+   * Typed inline rather than imported because `social.ts` already reaches into
+   * this module's neighbours and the shape is two fields.
+   */
+  mentions: z
+    .array(z.object({ accountId: IdSchema, displayName: z.string().min(1).max(140) }))
+    .max(10)
+    .default([]),
   attachments: z.array(AttachmentSchema).max(5),
   /** FR-507 — accounts that have read this message. */
   readBy: z.array(IdSchema).default([]),

@@ -16,6 +16,8 @@ import { nowIso, serialise } from '../../lib/firestore.js';
 import { logger } from '../../lib/logger.js';
 import * as push from './push.service.js';
 import { runReengagementSweep } from './fanout.service.js';
+import { runDigest } from './digest.service.js';
+import { enrichNotifications } from './presentation.service.js';
 import type { NotificationType } from './events.js';
 
 export const notificationsRouter = Router();
@@ -35,20 +37,44 @@ const ReengagementBody = z.object({
   limit: z.coerce.number().int().min(1).max(400).default(200),
 });
 
+/** Shared gate for every scheduled job below. */
+function assertCronCaller(secret: string | undefined): void {
+  if (!env.CRON_SECRET || secret !== env.CRON_SECRET) {
+    throw forbidden('This endpoint is not available.');
+  }
+}
+
 notificationsRouter.post(
   '/jobs/reengagement',
   validate(ReengagementBody),
   asyncHandler(async (req, res) => {
-    const provided = req.header('x-cron-secret');
-    if (!env.CRON_SECRET || provided !== env.CRON_SECRET) {
-      throw forbidden('This endpoint is not available.');
-    }
+    assertCronCaller(req.header('x-cron-secret'));
 
     const { inactiveDays, limit } = req.body as z.infer<typeof ReengagementBody>;
     const result = await runReengagementSweep({ inactiveDays, limit });
 
     logger.info(result, 'Re-engagement sweep complete');
     sendOk(res, result);
+  }),
+);
+
+/**
+ * FR-603/604 — sends the pending notification backlog by email.
+ *
+ * `events.ts` has been writing `pending_batch` / `pending_immediate` rows since
+ * messaging shipped and nothing read them. This is the consumer.
+ */
+const DigestBody = z.object({
+  limit: z.coerce.number().int().min(1).max(500).default(300),
+});
+
+notificationsRouter.post(
+  '/jobs/digest',
+  validate(DigestBody),
+  asyncHandler(async (req, res) => {
+    assertCronCaller(req.header('x-cron-secret'));
+    const { limit } = req.body as z.infer<typeof DigestBody>;
+    sendOk(res, await runDigest({ limit }));
   }),
 );
 
@@ -142,12 +168,17 @@ notificationsRouter.get(
       .limit(limit)
       .get();
 
-    let items = snap.docs.map((d) => serialise<NotificationRecord>({ id: d.id, ...d.data() }));
+    let records = snap.docs.map((d) => serialise<NotificationRecord>({ id: d.id, ...d.data() }));
 
     // Filtered in-process rather than in the query: adding `readAt == null` as
     // an equality filter would need yet another composite index for a list that
     // is capped at 50 documents anyway.
-    if (unreadOnly) items = items.filter((n) => !n.readAt);
+    if (unreadOnly) records = records.filter((n) => !n.readAt);
+
+    // Names, post previews and comment text are resolved here rather than
+    // stored on the event — see `presentation.service`. Without it every row
+    // reads "Someone did something", which is what shipped first.
+    const items = await enrichNotifications(records);
 
     sendOk(res, {
       items,

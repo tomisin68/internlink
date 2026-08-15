@@ -51,12 +51,34 @@ export function VideoPlayer({
 }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const inViewRef = useRef(false);
+  const hideTimer = useRef<number | undefined>(undefined);
   const [isPlaying, setIsPlaying] = useState(false);
   const [wantsPlayback, setWantsPlayback] = useState(autoPlay);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(item.durationSeconds ?? 0);
   const [isScrubbing, setIsScrubbing] = useState(false);
   const [buffered, setBuffered] = useState(0);
+  /**
+   * Whether the control bar is showing.
+   *
+   * It used to be revealed by `:hover` alone, which on a phone means never —
+   * and because a zero-opacity element still takes clicks, the invisible bar
+   * sat across the bottom of every feed video swallowing the taps meant for
+   * play/pause. Hence both halves of this fix: a real visibility state, and
+   * `pointer-events-none` while hidden.
+   */
+  const [controlsVisible, setControlsVisible] = useState(false);
+
+  /** Reveals the controls, then hides them again once playback settles. */
+  const revealControls = useCallback((sticky = false) => {
+    setControlsVisible(true);
+    window.clearTimeout(hideTimer.current);
+    if (!sticky) {
+      hideTimer.current = window.setTimeout(() => setControlsVisible(false), 2600);
+    }
+  }, []);
+
+  useEffect(() => () => window.clearTimeout(hideTimer.current), []);
 
   const seekBy = useCallback((seconds: number) => {
     const video = videoRef.current;
@@ -116,6 +138,20 @@ export function VideoPlayer({
   const isLightbox = variant === 'lightbox';
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
 
+  /** Play/pause, and show the controls so the state change is visible. */
+  function togglePlayback(): void {
+    setWantsPlayback((v) => {
+      // Pausing keeps the controls up — a paused video with no visible chrome
+      // looks like it failed to load.
+      revealControls(v);
+      return !v;
+    });
+  }
+
+  // Fullscreen always shows its chrome; a feed card reveals it on hover, focus
+  // or a tap, and hides it again while playing so the video is not half-covered.
+  const chromeShown = isLightbox || controlsVisible || !isPlaying;
+
   return (
     <div
       className={cn('group/video relative overflow-hidden', className)}
@@ -149,41 +185,49 @@ export function VideoPlayer({
       {/* Tap zones: the middle toggles playback, the sides double-tap to seek —
           the gesture people already know from every video app on a phone. */}
       <div className="absolute inset-0 flex">
-        <SeekZone onDoubleTap={() => seekBy(-SKIP_SECONDS)} label={`Back ${SKIP_SECONDS} seconds`} />
+        <SeekZone
+          onDoubleTap={() => seekBy(-SKIP_SECONDS)}
+          onTap={() => revealControls()}
+          label={`Back ${SKIP_SECONDS} seconds`}
+        />
         <button
           type="button"
-          onClick={() => setWantsPlayback((v) => !v)}
+          onClick={togglePlayback}
           aria-label={isPlaying ? 'Pause video' : 'Play video'}
           className="h-full flex-1 cursor-pointer focus-visible:outline-2 focus-visible:-outline-offset-4 focus-visible:outline-[var(--ring)]"
         />
         <SeekZone
           onDoubleTap={() => seekBy(SKIP_SECONDS)}
+          onTap={() => revealControls()}
           label={`Forward ${SKIP_SECONDS} seconds`}
         />
       </div>
 
+      {/* The big centre affordance. `pointer-events-none` so the tap falls
+          through to the play/pause zone behind it rather than needing a
+          pixel-accurate hit on the circle. */}
       {!isPlaying && (
-        <button
-          type="button"
-          onClick={() => setWantsPlayback(true)}
-          aria-label="Play video"
+        <span
+          aria-hidden="true"
           className="pointer-events-none absolute inset-0 flex items-center justify-center"
         >
           <span className="flex size-14 items-center justify-center rounded-full bg-[rgb(15_16_32_/_0.62)] text-white backdrop-blur-sm">
-            <Play aria-hidden="true" className="size-6 translate-x-0.5" fill="currentColor" />
+            <Play className="size-6 translate-x-0.5" fill="currentColor" />
           </span>
-        </button>
+        </span>
       )}
 
-      {/* Controls: always visible in the lightbox, on hover/focus in the feed.
-          A feed card covered in chrome is unreadable, but a fullscreen video
-          with hidden controls is a guessing game. */}
+      {/* Controls: always visible in the lightbox; in the feed they appear on
+          hover, on focus, on a tap, and whenever the video is paused. A feed
+          card permanently covered in chrome is unreadable — but a hidden bar
+          that still eats taps, which is what this was, is worse. */}
       <div
+        onPointerDown={() => revealControls(true)}
         className={cn(
           'absolute inset-x-0 bottom-0 bg-[linear-gradient(to_top,rgb(15_16_32_/_0.78),transparent)] px-2 pt-8 pb-2 transition-opacity duration-[200ms]',
-          isLightbox
-            ? 'opacity-100'
-            : 'opacity-0 group-hover/video:opacity-100 group-focus-within/video:opacity-100',
+          'group-hover/video:pointer-events-auto group-hover/video:opacity-100',
+          'group-focus-within/video:pointer-events-auto group-focus-within/video:opacity-100',
+          chromeShown ? 'opacity-100' : 'pointer-events-none opacity-0',
         )}
       >
         <Scrubber
@@ -202,7 +246,7 @@ export function VideoPlayer({
         <div className="mt-1 flex items-center gap-0.5">
           <ControlButton
             label={isPlaying ? 'Pause' : 'Play'}
-            onClick={() => setWantsPlayback((v) => !v)}
+            onClick={togglePlayback}
             icon={
               isPlaying ? (
                 <Pause className="size-4" fill="currentColor" />
@@ -252,7 +296,16 @@ export function VideoPlayer({
  * The delay is what makes both gestures live on the same element — a single tap
  * has to wait long enough to know it is not the first half of a double.
  */
-function SeekZone({ onDoubleTap, label }: { onDoubleTap: () => void; label: string }) {
+function SeekZone({
+  onDoubleTap,
+  onTap,
+  label,
+}: {
+  onDoubleTap: () => void;
+  /** Single tap. Reveals the controls rather than doing nothing at all. */
+  onTap: () => void;
+  label: string;
+}) {
   const lastTap = useRef(0);
 
   return (
@@ -267,6 +320,7 @@ function SeekZone({ onDoubleTap, label }: { onDoubleTap: () => void; label: stri
           return;
         }
         lastTap.current = now;
+        onTap();
       }}
       onDoubleClick={onDoubleTap}
       className="h-full w-1/5 cursor-pointer focus-visible:outline-2 focus-visible:-outline-offset-4 focus-visible:outline-[var(--ring)]"

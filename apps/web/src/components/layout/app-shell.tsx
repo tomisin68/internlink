@@ -4,10 +4,13 @@ import { useQuery } from '@tanstack/react-query';
 import {
   Bell,
   Briefcase,
+  Building2,
   Compass,
   Home,
   MessageSquare,
   Repeat,
+  Search,
+  Shield,
   Sparkles,
   Users,
 } from 'lucide-react';
@@ -88,6 +91,13 @@ export function AppShell({ children }: { children?: ReactNode }) {
   const notificationCount = notifications?.count ?? 0;
   const items = useNavItems(unread, isIntern);
 
+  const secondaryItems: Array<{ to: string; label: string; icon: typeof Home }> = [
+    { to: '/companies', label: 'Companies', icon: Building2 },
+    ...(account?.activeRole === 'admin'
+      ? [{ to: '/admin/moderation', label: 'Moderation', icon: Shield }]
+      : []),
+  ];
+
   if (!account) return null;
 
   const otherRole = isIntern ? 'recruiter' : 'intern';
@@ -116,6 +126,26 @@ export function AppShell({ children }: { children?: ReactNode }) {
             className="rounded-lg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--ring)]"
           >
             <Logo size="sm" />
+          </NavLink>
+
+          {/* Search sits in the top bar rather than the bottom nav: the nav is
+              capped at five and search is a thing you reach for, not a place
+              you live. */}
+          <NavLink
+            to="/search"
+            aria-label="Search"
+            className={({ isActive }) =>
+              cn(
+                'ml-1 flex h-9 min-w-9 flex-1 items-center gap-2 rounded-lg px-2.5 text-sm transition-colors duration-[160ms] sm:max-w-64',
+                'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--ring)]',
+                isActive
+                  ? 'bg-brand-subtle text-brand-fg'
+                  : 'bg-surface-sunken text-fg-subtle hover:text-fg',
+              )
+            }
+          >
+            <Search aria-hidden="true" className="size-4 shrink-0" />
+            <span className="hidden truncate sm:inline">Search people, posts, #topics</span>
           </NavLink>
 
           <div className="ml-auto flex items-center gap-1.5">
@@ -200,8 +230,35 @@ export function AppShell({ children }: { children?: ReactNode }) {
             </NavLink>
           ))}
 
+          {/* Secondary destinations. The rail is not capped at five the way
+              the bottom bar is, so these live here and on the profile screen
+              rather than squeezing the main bar. */}
+          <div className="mt-2 border-t border-border-subtle pt-2">
+            {secondaryItems.map((item) => (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                className={({ isActive }) =>
+                  cn(
+                    'flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-medium transition-colors duration-[160ms]',
+                    'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--ring)]',
+                    isActive
+                      ? 'bg-brand-subtle text-brand-fg'
+                      : 'text-fg-muted hover:bg-surface-sunken hover:text-fg',
+                  )
+                }
+              >
+                <item.icon aria-hidden="true" className="size-5" />
+                {item.label}
+              </NavLink>
+            ))}
+          </div>
+
           {!isIntern && company && (
-            <div className="mt-6 rounded-xl border border-border-default bg-surface p-3.5">
+            <NavLink
+              to={`/c/${company.id}`}
+              className="mt-6 block rounded-xl border border-border-default bg-surface p-3.5 transition-colors hover:bg-surface-sunken focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--ring)]"
+            >
               <div className="flex items-center gap-2.5">
                 <Avatar
                   name={company.name}
@@ -217,7 +274,7 @@ export function AppShell({ children }: { children?: ReactNode }) {
                   </p>
                 </div>
               </div>
-            </div>
+            </NavLink>
           )}
         </nav>
 

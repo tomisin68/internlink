@@ -4,11 +4,18 @@ import type {
   ApplicationPublic,
   ApplicationStatus,
   Company,
+  CompanyCard,
+  CompanyProfile,
   ConnectionRecord,
   CreateCommentInput,
   CreatePostInput,
   FeedItem,
   FollowCounts,
+  ModerationFlag,
+  ModerationFlagView,
+  ModerationStats,
+  ResolveFlagInput,
+  UpdateCompanyInput,
   InboxSummary,
   InternProfile,
   Listing,
@@ -20,11 +27,15 @@ import type {
   PostComment,
   PostCommentThread,
   PostDetail,
+  PostMedia,
+  PostReactor,
+  ProfileViews,
   PublicProfile,
   PushCapabilities,
   PushTokenInput,
   RecruiterProfile,
   Relationship,
+  SearchResults,
   SessionPayload,
   Thread,
   UpdateAccountImagesInput,
@@ -37,6 +48,15 @@ import { api } from './api-client';
 export const queryKeys = {
   session: ['session'] as const,
   feed: (scope: string) => ['feed', scope] as const,
+  /** A hashtag page and a profile's posts are both feeds with a filter. */
+  tagFeed: (tag: string) => ['feed', 'tag', tag] as const,
+  authorFeed: (accountId: string) => ['feed', 'author', accountId] as const,
+  savedFeed: ['feed', 'saved'] as const,
+  postReactors: (postId: string) => ['feed', 'posts', postId, 'reactors'] as const,
+  mentionCandidates: (q: string) => ['feed', 'mentions', q] as const,
+  search: (q: string, scope: string) => ['search', scope, q] as const,
+  profileStats: ['profiles', 'me', 'stats'] as const,
+  profileViews: ['profiles', 'me', 'views'] as const,
   matches: ['feed', 'matches'] as const,
   threads: (box: string) => ['messages', 'threads', box] as const,
   thread: (id: string) => ['messages', 'thread', id] as const,
@@ -45,6 +65,12 @@ export const queryKeys = {
   connections: ['network', 'connections'] as const,
   pendingConnections: ['network', 'connections', 'pending'] as const,
   people: (scope: string, q: string) => ['network', 'people', scope, q] as const,
+  companies: (q: string, verified: boolean) => ['companies', q, verified] as const,
+  company: (id: string) => ['companies', id] as const,
+  companyListings: (id: string) => ['companies', id, 'listings'] as const,
+  companyPosts: (id: string) => ['companies', id, 'posts'] as const,
+  moderationQueue: (status: string) => ['admin', 'moderation', status] as const,
+  moderationStats: ['admin', 'moderation', 'stats'] as const,
   relationship: (id: string) => ['network', 'relationship', id] as const,
   followCounts: (id: string) => ['network', 'follows', id] as const,
   comments: (postId: string) => ['feed', 'posts', postId, 'comments'] as const,
@@ -89,6 +115,9 @@ export const listingsApi = {
     title: string;
     description: string;
     skills: string[];
+    /** FR-303 — a role post carries photos and video like any other post. */
+    media?: PostMedia[];
+    tags?: string[];
     location?: string | null;
     workMode: WorkMode;
     durationMonths?: number | null;
@@ -125,6 +154,24 @@ export const profileApiClient = {
   getPublic: (accountId: string) => api.get<PublicProfile>(`/profiles/${accountId}`),
 
   /**
+   * The counts on your own profile header.
+   *
+   * A separate read from the session because these change constantly and the
+   * session is cached for the whole visit.
+   */
+  myStats: () =>
+    api.get<{
+      followers: number;
+      following: number;
+      connections: number;
+      posts: number;
+      joinedAt: string | null;
+    }>('/profiles/me/stats'),
+
+  /** FR-1001 — who has looked at your profile. Yours only, by design. */
+  myViews: () => api.get<ProfileViews>('/profiles/me/views'),
+
+  /**
    * Profile photo and cover image. Returns the whole session so the header
    * updates everywhere at once, not just where the change was made.
    */
@@ -148,9 +195,31 @@ export const pushApi = {
 
 export type { Account };
 
+export interface FeedRequest {
+  scope?: 'for_you' | 'following' | 'saved';
+  /** Hashtag page. Normalised server-side, so a leading `#` is fine. */
+  tag?: string;
+  /** A single author's posts — what the profile "Posts" tab asks for. */
+  authorId?: string;
+  limit?: number;
+}
+
 export const feedApi = {
-  getFeed: (scope: 'for_you' | 'following', limit = 20) =>
-    api.get<{ items: FeedItem[]; hasMore: boolean }>(`/feed?scope=${scope}&limit=${limit}`),
+  getFeed: (request: FeedRequest | 'for_you' | 'following' = 'for_you', limit = 20) => {
+    // The string form is the original signature, kept because the feed screen
+    // and several callers still pass a bare scope.
+    const options: FeedRequest =
+      typeof request === 'string' ? { scope: request, limit } : { limit, ...request };
+
+    const params = new URLSearchParams({
+      scope: options.scope ?? 'for_you',
+      limit: String(options.limit ?? 20),
+    });
+    if (options.tag) params.set('tag', options.tag);
+    if (options.authorId) params.set('authorId', options.authorId);
+
+    return api.get<{ items: FeedItem[]; hasMore: boolean }>(`/feed?${params}`);
+  },
 
   getMatches: (limit = 20, minScore = 25) =>
     api.get<{ items: MatchResult[]; profileReady: boolean }>(
@@ -167,8 +236,26 @@ export const feedApi = {
 
   deletePost: (id: string) => api.delete<{ deleted: boolean }>(`/feed/posts/${id}`),
 
+  /**
+   * A reaction on a reshare lands on the original — the server resolves that
+   * and reports which post actually took it in `postId`.
+   */
   toggleReaction: (id: string) =>
-    api.post<{ hasReacted: boolean; reactionCount: number }>(`/feed/posts/${id}/reactions`),
+    api.post<{ hasReacted: boolean; reactionCount: number; postId: string }>(
+      `/feed/posts/${id}/reactions`,
+    ),
+
+  /** FR-1007 — save a post. Idempotent toggle; the server owns the state. */
+  toggleBookmark: (id: string) =>
+    api.post<{ isBookmarked: boolean }>(`/feed/posts/${id}/bookmarks`),
+
+  /** Who reacted — what the "Liked by…" line expands into. */
+  listReactors: (id: string) =>
+    api.get<{ items: PostReactor[] }>(`/feed/posts/${id}/reactions`),
+
+  /** People the composer can tag. Scoped to your connections and follows. */
+  mentionCandidates: (q: string) =>
+    api.get<{ items: PostReactor[] }>(`/feed/mentions?q=${encodeURIComponent(q)}`),
 
   reshare: (id: string, input: { body?: string; asCompany?: boolean } = {}) =>
     api.post<Post>(`/feed/posts/${id}/reshares`, input),
@@ -186,6 +273,38 @@ export const feedApi = {
 
   deleteComment: (postId: string, commentId: string) =>
     api.delete<{ deleted: boolean }>(`/feed/posts/${postId}/comments/${commentId}`),
+};
+
+/** FR-1008 — company pages. */
+export const companiesApi = {
+  browse: (q = '', verifiedOnly = false) => {
+    const params = new URLSearchParams();
+    if (q) params.set('q', q);
+    if (verifiedOnly) params.set('verifiedOnly', 'true');
+    const query = params.toString();
+    return api.get<{ items: CompanyCard[] }>(`/companies${query ? `?${query}` : ''}`);
+  },
+
+  get: (companyId: string) => api.get<CompanyProfile>(`/companies/${companyId}`),
+
+  listings: (companyId: string) =>
+    api.get<{ items: Listing[] }>(`/companies/${companyId}/listings`),
+
+  posts: (companyId: string) => api.get<{ items: Post[] }>(`/companies/${companyId}/posts`),
+
+  update: (companyId: string, input: UpdateCompanyInput) =>
+    api.patch<Company>(`/companies/${companyId}`, input),
+};
+
+/** §9.3 — the moderation console. Every route is admin-only server-side. */
+export const adminApi = {
+  stats: () => api.get<ModerationStats>('/admin/moderation/stats'),
+
+  queue: (status: 'open' | 'reviewing' | 'actioned' | 'dismissed' = 'open') =>
+    api.get<{ items: ModerationFlagView[] }>(`/admin/moderation?status=${status}`),
+
+  resolve: (flagId: string, input: ResolveFlagInput) =>
+    api.post<ModerationFlag>(`/admin/moderation/${flagId}/resolve`, input),
 };
 
 export const messagingApi = {
@@ -244,8 +363,9 @@ export const networkApi = {
   relationship: (accountId: string) =>
     api.get<{ relationship: Relationship }>(`/network/relationship/${accountId}`),
 
+  /** `mutual` is true when this was a follow *back* — worth saying out loud. */
   followAccount: (accountId: string) =>
-    api.post<{ following: boolean }>(`/network/follows/accounts/${accountId}`),
+    api.post<{ following: boolean; mutual: boolean }>(`/network/follows/accounts/${accountId}`),
 
   unfollowAccount: (accountId: string) =>
     api.delete<{ following: boolean }>(`/network/follows/accounts/${accountId}`),
@@ -262,9 +382,21 @@ export const networkApi = {
   block: (accountId: string) => api.post<{ blocked: boolean }>(`/network/blocks/${accountId}`),
 
   report: (input: {
-    targetType: 'listing' | 'message' | 'post' | 'profile' | 'company';
+    targetType: 'listing' | 'message' | 'post' | 'comment' | 'profile' | 'company';
     targetId: string;
+    /** The post a comment sits under — see `CreateReportSchema`. */
+    parentId?: string | null;
     reason: string;
     detail?: string;
   }) => api.post<{ id: string; severity: string; message: string }>('/network/reports', input),
 };
+
+/** FR-1006 — one box across people, companies, posts and hashtags. */
+export const searchApi = {
+  run: (q: string, scope: 'all' | 'people' | 'companies' | 'posts' = 'all') =>
+    api.get<SearchResults>(
+      `/search?q=${encodeURIComponent(q)}&scope=${scope}&limit=20`,
+    ),
+};
+
+export type { PostMedia };

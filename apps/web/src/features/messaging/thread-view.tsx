@@ -6,6 +6,8 @@ import type { Message, Thread } from '@internlink/shared-types';
 import { Avatar } from '@/components/ui/avatar';
 import { Button, IconButton } from '@/components/ui/button';
 import { Alert, EmptyState } from '@/components/ui/feedback';
+import { MentionInput } from '@/components/ui/mention-input';
+import { RichText } from '@/components/ui/rich-text';
 import { cn } from '@/lib/cn';
 import { dayLabel, relativeTime } from '@/lib/format';
 import { messagingApi, queryKeys } from '@/lib/api-endpoints';
@@ -211,23 +213,22 @@ export function ThreadView() {
           }}
           className="flex items-end gap-2 border-t border-border-subtle bg-surface p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))]"
         >
-          <textarea
+          {/* Enter sends and Shift+Enter breaks the line — the convention every
+              messaging app has trained people on. `MentionInput` owns Enter
+              while its `@` picker is open, so a tag is chosen rather than sent. */}
+          <MentionInput
             value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              // Enter sends, Shift+Enter breaks the line — the convention every
-              // messaging app has trained people on.
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                const body = draft.trim();
-                if (body && !send.isPending) send.mutate(body);
-              }
+            onChange={setDraft}
+            submitOnEnter
+            onSubmit={() => {
+              const body = draft.trim();
+              if (body && !send.isPending) send.mutate(body);
             }}
             rows={1}
             placeholder={isOutgoingRequest ? 'Waiting for them to accept…' : 'Write a message…'}
             disabled={isOutgoingRequest || send.isPending}
             aria-label="Message"
-            className="max-h-32 min-h-11 flex-1 resize-none rounded-xl border border-border-default bg-surface px-3.5 py-2.5 text-base placeholder:text-fg-faint focus:border-brand focus:shadow-[0_0_0_3px_color-mix(in_srgb,var(--brand)_16%,transparent)] focus:outline-none disabled:bg-surface-sunken disabled:text-fg-faint"
+            className="max-h-32 min-h-11 w-full resize-none rounded-xl border border-border-default bg-surface px-3.5 py-2.5 text-base placeholder:text-fg-faint focus:border-brand focus:shadow-[0_0_0_3px_color-mix(in_srgb,var(--brand)_16%,transparent)] focus:outline-none disabled:bg-surface-sunken disabled:text-fg-faint"
           />
           <IconButton
             type="submit"
@@ -249,13 +250,13 @@ function MessageBubble({ message, isOwn }: { message: Message; isOwn: boolean })
       <div className={cn('max-w-[78%]', isOwn && 'items-end')}>
         <div
           className={cn(
-            'rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed break-words whitespace-pre-wrap',
+            'rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed break-words',
             isOwn
               ? 'rounded-br-md bg-brand text-fg-on-brand'
               : 'rounded-bl-md bg-surface-sunken text-fg',
           )}
         >
-          {message.body}
+          <RichText body={message.body} mentions={message.mentions ?? []} />
         </div>
 
         {/* FR-1101 — the recipient is warned, but the message is not hidden.

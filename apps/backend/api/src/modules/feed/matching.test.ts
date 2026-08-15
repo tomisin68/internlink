@@ -47,6 +47,8 @@ function listing(overrides: Partial<Listing> = {}): Listing {
     title: 'Frontend Intern',
     description: 'Build things.',
     skills: ['React', 'TypeScript'],
+    media: [],
+    tags: [],
     location: 'Lagos, Nigeria',
     workMode: 'hybrid',
     durationMonths: 6,

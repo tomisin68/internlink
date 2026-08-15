@@ -1,15 +1,18 @@
 import { FieldValue } from 'firebase-admin/firestore';
-import type {
-  CreateCommentInput,
-  CreatePostInput,
-  Post,
-  PostAuthor,
-  PostComment,
-  PostCommentThread,
-  PostCommentView,
-  PostMedia,
-  ResharePostInput,
-  ResharedPost,
+import {
+  MAX_POST_TAGS,
+  extractHashtags,
+  type CreateCommentInput,
+  type CreatePostInput,
+  type Mention,
+  type Post,
+  type PostAuthor,
+  type PostComment,
+  type PostCommentThread,
+  type PostCommentView,
+  type PostMedia,
+  type ResharePostInput,
+  type ResharedPost,
 } from '@internlink/shared-types';
 import { Collections, db } from '../../config/firebase.js';
 import { docToEntity, nowIso, serialise } from '../../lib/firestore.js';
@@ -22,6 +25,8 @@ import { scanForScamPatterns } from '../moderation/scam-detection.js';
 import { autoFlag } from '../moderation/moderation.service.js';
 import { emit } from '../notifications/events.js';
 import { notifyFollowersOfPost } from '../notifications/fanout.service.js';
+import { hydrateCommentAuthors } from './author-hydration.js';
+import { resolveMentions } from './engagement.service.js';
 
 /**
  * Builds the denormalised author block stamped onto every post.
@@ -100,12 +105,50 @@ function normaliseMedia(input: Pick<CreatePostInput, 'media' | 'mediaUrl'>): {
   return { media, mediaUrl: firstImage?.url ?? input.mediaUrl ?? null };
 }
 
+/**
+ * Merges hashtags typed into the body with any picked from the composer.
+ *
+ * Someone writing "#lagos" mid-sentence plainly means it as a topic. Asking
+ * them to also add it to a separate tag field is duplication people skip, and
+ * then the post is untaggable through the one route they actually used.
+ */
+function resolveTags(body: string, explicit: string[]): string[] {
+  const normalise = (tag: string) => tag.trim().replace(/^#/, '').toLowerCase();
+  return [...new Set([...explicit.map(normalise), ...extractHashtags(body)])]
+    .filter(Boolean)
+    .slice(0, MAX_POST_TAGS);
+}
+
+/** Tells everyone tagged in a body that they were, except the author. */
+function notifyMentions(args: {
+  mentions: Mention[];
+  byAccountId: string;
+  postId: string;
+  commentId?: string;
+  preview: string;
+}): void {
+  for (const mention of args.mentions) {
+    if (mention.accountId === args.byAccountId) continue;
+    void emit({
+      accountId: mention.accountId,
+      type: 'mention',
+      payload: {
+        postId: args.postId,
+        commentId: args.commentId ?? null,
+        byAccountId: args.byAccountId,
+        preview: args.preview.slice(0, 160),
+      },
+    });
+  }
+}
+
 export async function createPost(accountId: string, input: CreatePostInput): Promise<Post> {
   await consumeQuota(accountId, 'post');
 
   const { author, companyId } = await buildAuthor(accountId, input.asCompany);
   const scan = scanForScamPatterns(input.body);
   const { media, mediaUrl } = normaliseMedia(input);
+  const mentions = await resolveMentions(accountId, input.body);
   const ts = nowIso();
 
   const post: Omit<Post, 'id'> = {
@@ -118,7 +161,8 @@ export async function createPost(accountId: string, input: CreatePostInput): Pro
     media,
     linkUrl: input.linkUrl ?? null,
     listingId: input.listingId ?? null,
-    tags: input.tags,
+    tags: resolveTags(input.body, input.tags),
+    mentions,
     reactionCount: 0,
     commentCount: 0,
     shareCount: 0,
@@ -148,13 +192,46 @@ export async function createPost(accountId: string, input: CreatePostInput): Pro
 
   // Detached: the author should not wait on their followers' devices, and a
   // post held back pending review should not announce itself.
-  if (!created.isFlagged) void notifyFollowersOfPost(created);
+  if (!created.isFlagged) {
+    void notifyFollowersOfPost(created);
+    notifyMentions({
+      mentions,
+      byAccountId: accountId,
+      postId: ref.id,
+      preview: input.body,
+    });
+  }
 
   return created;
 }
 
 export async function getPost(postId: string): Promise<Post | null> {
   return docToEntity<Post>(await db().collection(Collections.posts).doc(postId).get());
+}
+
+/**
+ * The post an interaction actually belongs to.
+ *
+ * FR-1007 — liking a reshare likes the *original*. The alternative splits one
+ * conversation across every copy of it: the author of the thing everybody is
+ * reacting to sees none of it, and a reader has to visit five reshares to find
+ * the discussion. Resolving it server-side means every client gets this right
+ * without having to know the rule, and a like placed on a reshare before this
+ * shipped still points where it always did.
+ *
+ * The reshare keeps its own `shareCount` and its own attribution — it is still
+ * visibly *your* reshare, it just does not fork the engagement.
+ */
+export async function resolveInteractionTarget(postId: string): Promise<Post> {
+  const post = await getPost(postId);
+  if (!post) throw notFound('That post');
+  if (!post.resharedFrom) return post;
+
+  const original = await getPost(post.resharedFrom.postId);
+  // The original may have been deleted since. The reshare's snapshot is then
+  // the only surviving copy, so its own document takes the interaction rather
+  // than the like silently failing.
+  return original ?? post;
 }
 
 /** The author's own controls. Currently just the reshare switch (FR-1007). */
@@ -258,7 +335,11 @@ export async function resharePost(
     media: [],
     linkUrl: null,
     listingId: null,
-    tags: [],
+    tags: resolveTags(input.body, []),
+    mentions: await resolveMentions(accountId, input.body),
+    // A reshare's likes and comments belong to the original — see
+    // `resolveInteractionTarget`. Its own counters stay at zero and are never
+    // incremented, which is what keeps "12 likes" meaning one number.
     reactionCount: 0,
     commentCount: 0,
     shareCount: 0,
@@ -284,7 +365,12 @@ export async function resharePost(
     void emit({
       accountId: root.authorAccountId,
       type: 'post_reshare',
-      payload: { postId: root.postId, resharePostId: ref.id, byAccountId: accountId },
+      payload: {
+        postId: root.postId,
+        resharePostId: ref.id,
+        byAccountId: accountId,
+        preview: input.body.slice(0, 160),
+      },
     });
   }
 
@@ -307,13 +393,17 @@ export async function hasReacted(accountId: string, postId: string): Promise<boo
  *
  * Toggling is idempotent as a result: a double-tap on a flaky connection
  * cannot leave a post with two reactions from the same person.
+ *
+ * A reaction placed on a reshare lands on the original — see
+ * `resolveInteractionTarget`. The returned `postId` says which post actually
+ * took it, so the caller can update the right cache entry.
  */
 export async function toggleReaction(
   accountId: string,
-  postId: string,
-): Promise<{ hasReacted: boolean; reactionCount: number }> {
-  const post = await getPost(postId);
-  if (!post) throw notFound('That post');
+  requestedPostId: string,
+): Promise<{ hasReacted: boolean; reactionCount: number; postId: string }> {
+  const post = await resolveInteractionTarget(requestedPostId);
+  const postId = post.id;
 
   const reactionRef = db().collection(Collections.postReactions).doc(`${postId}__${accountId}`);
   const postRef = db().collection(Collections.posts).doc(postId);
@@ -325,7 +415,7 @@ export async function toggleReaction(
     batch.delete(reactionRef);
     batch.update(postRef, { reactionCount: FieldValue.increment(-1) });
     await batch.commit();
-    return { hasReacted: false, reactionCount: Math.max(0, post.reactionCount - 1) };
+    return { hasReacted: false, reactionCount: Math.max(0, post.reactionCount - 1), postId };
   }
 
   const batch = db().batch();
@@ -341,7 +431,7 @@ export async function toggleReaction(
     });
   }
 
-  return { hasReacted: true, reactionCount: post.reactionCount + 1 };
+  return { hasReacted: true, reactionCount: post.reactionCount + 1, postId };
 }
 
 function commentsRef(postId: string) {
@@ -350,11 +440,13 @@ function commentsRef(postId: string) {
 
 export async function addComment(
   accountId: string,
-  postId: string,
+  requestedPostId: string,
   input: CreateCommentInput,
 ): Promise<PostComment> {
-  const post = await getPost(postId);
-  if (!post) throw notFound('That post');
+  // A comment left on a reshare belongs on the original, for the same reason a
+  // reaction does — see `resolveInteractionTarget`.
+  const post = await resolveInteractionTarget(requestedPostId);
+  const postId = post.id;
 
   // Replies are one level deep — replying to a reply attaches to its parent.
   // See the note on `parentCommentId`; resolving it here rather than in the UI
@@ -371,7 +463,10 @@ export async function addComment(
     notify = parent.authorAccountId;
   }
 
-  const { author } = await buildAuthor(accountId, false);
+  const [{ author }, mentions] = await Promise.all([
+    buildAuthor(accountId, false),
+    resolveMentions(accountId, input.body),
+  ]);
   const ts = nowIso();
 
   const comment: Omit<PostComment, 'id'> = {
@@ -380,6 +475,7 @@ export async function addComment(
     authorAccountId: accountId,
     body: input.body,
     parentCommentId,
+    mentions,
     likeCount: 0,
     replyCount: 0,
     createdAt: ts,
@@ -405,18 +501,37 @@ export async function addComment(
     void emit({
       accountId: notify,
       type: 'post_comment',
-      payload: { postId, commentId: ref.id, byAccountId: accountId, isReply: Boolean(parentCommentId) },
+      payload: {
+        postId,
+        commentId: ref.id,
+        byAccountId: accountId,
+        isReply: Boolean(parentCommentId),
+        // The preview is what turns "someone commented" into something worth
+        // opening — and on a phone it is often the whole comment.
+        preview: input.body.slice(0, 160),
+      },
     });
   }
+
+  // Tagged people hear about it even when they are not the post author, but
+  // never twice: whoever was already notified above is skipped.
+  notifyMentions({
+    mentions: mentions.filter((m) => m.accountId !== notify),
+    byAccountId: accountId,
+    postId,
+    commentId: ref.id,
+    preview: input.body,
+  });
 
   return { id: ref.id, ...comment };
 }
 
 export async function deleteComment(
   accountId: string,
-  postId: string,
+  requestedPostId: string,
   commentId: string,
 ): Promise<void> {
+  const postId = (await resolveInteractionTarget(requestedPostId)).id;
   const snap = await commentsRef(postId).doc(commentId).get();
   if (!snap.exists) throw notFound('That comment');
   const comment = serialise<PostComment>({ id: snap.id, ...snap.data() });
@@ -459,9 +574,10 @@ export async function deleteComment(
  */
 export async function toggleCommentReaction(
   accountId: string,
-  postId: string,
+  requestedPostId: string,
   commentId: string,
 ): Promise<{ hasLiked: boolean; likeCount: number }> {
+  const postId = (await resolveInteractionTarget(requestedPostId)).id;
   const snap = await commentsRef(postId).doc(commentId).get();
   if (!snap.exists) throw notFound('That comment');
   const comment = serialise<PostComment>({ id: snap.id, ...snap.data() });
@@ -513,6 +629,7 @@ export function groupComments(
   const toView = (comment: PostComment): PostCommentView => ({
     ...comment,
     parentCommentId: comment.parentCommentId ?? null,
+    mentions: comment.mentions ?? [],
     likeCount: comment.likeCount ?? 0,
     replyCount: comment.replyCount ?? 0,
     hasLiked: likedIds.has(comment.id),
@@ -545,16 +662,25 @@ export function groupComments(
  * section that loads in N+1 requests is the reason comment sections feel slow.
  */
 export async function listComments(
-  postId: string,
+  requestedPostId: string,
   limit: number,
   viewerId: string | null,
 ): Promise<PostCommentThread[]> {
+  // Opening the comments on a reshare shows the original's thread — that is
+  // where the conversation is. See `resolveInteractionTarget`.
+  const postId = (await resolveInteractionTarget(requestedPostId)).id;
   const snap = await commentsRef(postId).orderBy('createdAt', 'asc').limit(limit).get();
 
-  const comments = snap.docs.map((d) => serialise<PostComment>({ id: d.id, ...d.data() }));
-  if (comments.length === 0) return [];
+  const raw = snap.docs.map((d) => serialise<PostComment>({ id: d.id, ...d.data() }));
+  if (raw.length === 0) return [];
 
-  const liked = viewerId ? await likedCommentIds(viewerId, postId) : new Set<string>();
+  // Authors are re-resolved for the same reason posts' are: a commenter who
+  // added a photo after commenting should not be stuck as initials.
+  const [comments, liked] = await Promise.all([
+    hydrateCommentAuthors(raw),
+    viewerId ? likedCommentIds(viewerId, postId) : Promise.resolve(new Set<string>()),
+  ]);
+
   return groupComments(comments, liked);
 }
 

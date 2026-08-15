@@ -70,6 +70,8 @@ export function useRealtimeMessages(threadId: string | undefined, enabled = true
                 threadId,
                 senderId: data.senderId as string,
                 body: (data.body as string) ?? '',
+                // Absent on every message written before tagging shipped.
+                mentions: (data.mentions as Message['mentions']) ?? [],
                 attachments: (data.attachments as Message['attachments']) ?? [],
                 readBy: (data.readBy as string[]) ?? [],
                 isFlagged: Boolean(data.isFlagged),

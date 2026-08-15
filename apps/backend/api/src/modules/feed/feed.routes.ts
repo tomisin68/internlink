@@ -21,6 +21,9 @@ import { validate, validated } from '../../middleware/validate.js';
 import { writeLimiter } from '../../middleware/rate-limit.js';
 import * as feed from './feed.service.js';
 import * as posts from '../posts/posts.service.js';
+import * as engagement from '../posts/engagement.service.js';
+import { hydratePostAuthor } from '../posts/author-hydration.js';
+import { followedIds } from '../connections/connections.service.js';
 
 export const feedRouter = Router();
 
@@ -77,21 +80,100 @@ feedRouter.get(
   '/posts/:id',
   asyncHandler(async (req, res) => {
     if (!req.auth) throw unauthenticated();
+    const { accountId } = req.auth;
     const id = param(req, 'id');
 
-    const post = await posts.getPost(id);
-    if (!post) throw notFound('That post');
+    const raw = await posts.getPost(id);
+    if (!raw) throw notFound('That post');
     // A flagged post is visible to its author and nobody else — same rule the
     // feed ranker applies, restated here because this route bypasses the feed.
-    if (post.isFlagged && post.authorAccountId !== req.auth.accountId) {
+    if (raw.isFlagged && raw.authorAccountId !== accountId) {
       throw notFound('That post');
     }
 
+    // Likes and comments on a reshare belong to the original, so the card shows
+    // the original's numbers — see `resolveInteractionTarget`.
+    const target = await posts.resolveInteractionTarget(id);
+    const [post, hasReacted, isBookmarked, reactors, follows] = await Promise.all([
+      hydratePostAuthor(raw),
+      posts.hasReacted(accountId, target.id),
+      engagement.isBookmarked(accountId, id),
+      engagement.listReactors(target.id, 12),
+      followedIds(accountId),
+    ]);
+
     sendOk(res, {
-      post,
-      hasReacted: await posts.hasReacted(req.auth.accountId, id),
+      post:
+        target.id === post.id
+          ? post
+          : {
+              ...post,
+              reactionCount: target.reactionCount,
+              commentCount: target.commentCount,
+              shareCount: target.shareCount ?? 0,
+              allowResharing: target.allowResharing,
+            },
+      hasReacted,
+      isBookmarked,
+      isFollowingAuthor:
+        post.author.kind === 'company'
+          ? follows.companies.has(post.author.id)
+          : follows.accounts.has(post.author.id),
+      reactors,
       shareUrl: `${env.WEB_APP_ORIGIN}/p/${id}`,
     });
+  }),
+);
+
+/**
+ * FR-1007 — saving a post.
+ *
+ * A toggle rather than separate verbs: the client already knows the current
+ * state from the feed payload, and a POST/DELETE pair invites the two to
+ * disagree when a tap races a refresh.
+ */
+feedRouter.post(
+  '/posts/:id/bookmarks',
+  writeLimiter,
+  asyncHandler(async (req, res) => {
+    if (!req.auth) throw unauthenticated();
+    sendOk(res, await engagement.toggleBookmark(req.auth.accountId, param(req, 'id')));
+  }),
+);
+
+feedRouter.delete(
+  '/posts/:id/bookmarks',
+  asyncHandler(async (req, res) => {
+    if (!req.auth) throw unauthenticated();
+    sendOk(res, await engagement.setBookmark(req.auth.accountId, param(req, 'id'), false));
+  }),
+);
+
+/** Who reacted — what the "Liked by…" line expands into. */
+feedRouter.get(
+  '/posts/:id/reactions',
+  asyncHandler(async (req, res) => {
+    if (!req.auth) throw unauthenticated();
+    const target = await posts.resolveInteractionTarget(param(req, 'id'));
+    sendOk(res, { items: await engagement.listReactors(target.id, 60) });
+  }),
+);
+
+/**
+ * People the composer can tag.
+ *
+ * Scoped to the author's connections and follows — see `resolveMentions` for
+ * why "anyone can tag anyone" is not the default here.
+ */
+const MentionQuery = z.object({ q: z.string().trim().max(80).default('') });
+
+feedRouter.get(
+  '/mentions',
+  validate(MentionQuery, 'query'),
+  asyncHandler(async (req, res) => {
+    if (!req.auth) throw unauthenticated();
+    const { q } = validated<typeof MentionQuery>(req, 'query');
+    sendOk(res, { items: await engagement.mentionCandidates(req.auth.accountId, q) });
   }),
 );
 

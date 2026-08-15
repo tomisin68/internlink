@@ -6,6 +6,8 @@ import { env, hasCloudinaryCredentials, hasResendCredentials } from './config/en
 import { db, isFirebaseReady } from './config/firebase.js';
 import { authRouter } from './modules/auth/auth.routes.js';
 import { profilesRouter } from './modules/profiles/profiles.routes.js';
+import { companiesRouter } from './modules/companies/companies.routes.js';
+import { adminRouter } from './modules/moderation/moderation.routes.js';
 import { listingsRouter } from './modules/listings/listings.routes.js';
 import { applicationsRouter } from './modules/applications/applications.routes.js';
 import { uploadsRouter } from './modules/uploads/uploads.routes.js';
@@ -13,6 +15,7 @@ import { messagingRouter } from './modules/messaging/messaging.routes.js';
 import { networkRouter } from './modules/connections/connections.routes.js';
 import { feedRouter } from './modules/feed/feed.routes.js';
 import { notificationsRouter } from './modules/notifications/notifications.routes.js';
+import { searchRouter } from './modules/search/search.routes.js';
 import { shareRouter } from './modules/share/share.routes.js';
 
 const startedAt = Date.now();
@@ -58,6 +61,8 @@ apiRouter.get(
 
 apiRouter.use('/auth', authRouter);
 apiRouter.use('/profiles', profilesRouter);
+apiRouter.use('/companies', companiesRouter);
+apiRouter.use('/admin', adminRouter);
 apiRouter.use('/listings', listingsRouter);
 apiRouter.use('/applications', applicationsRouter);
 apiRouter.use('/uploads', uploadsRouter);
@@ -65,6 +70,7 @@ apiRouter.use('/messages', messagingRouter);
 apiRouter.use('/network', networkRouter);
 apiRouter.use('/feed', feedRouter);
 apiRouter.use('/notifications', notificationsRouter);
+apiRouter.use('/search', searchRouter);
 // Share pages are mounted at the API root as well (see app.ts) — a public,
 // permanent link should not carry an API version in it. Kept here too so a
 // versioned client can still reach them.

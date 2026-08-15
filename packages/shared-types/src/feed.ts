@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { IdSchema } from './entities.js';
 import { ListingSchema } from './entities.js';
-import { PostSchema, RelationshipSchema } from './social.js';
+import { PostReactorSchema, PostSchema, RelationshipSchema } from './social.js';
 
 /* ======================================================= Match scoring ==== */
 
@@ -83,14 +83,41 @@ export const FeedItemSchema = z.object({
   relationship: RelationshipSchema,
   score: z.number(),
   hasReacted: z.boolean(),
+  /** FR-1007 — whether the viewer has saved this post. */
+  isBookmarked: z.boolean().default(false),
+  /**
+   * Whether the viewer follows the author.
+   *
+   * Resolved here rather than fetched per card: a feed page of twenty posts
+   * would otherwise fire twenty relationship requests just to decide which
+   * button to draw.
+   */
+  isFollowingAuthor: z.boolean().default(false),
+  /**
+   * Engagement state of the post the reactions actually belong to.
+   *
+   * On a reshare these are the *original's* numbers, because that is where the
+   * likes and comments go — see `interactionPostId`.
+   */
+  interactionPostId: z.string(),
+  /** A sample of who reacted — "Liked by Ada and 24 others". */
+  reactors: z.array(PostReactorSchema).default([]),
 });
 export type FeedItem = z.infer<typeof FeedItemSchema>;
 
 export const FeedQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(50).default(20),
   cursor: z.string().optional(),
-  /** `following` drops the global-popular backfill. */
-  scope: z.enum(['for_you', 'following']).default('for_you'),
+  /**
+   * `following` drops the global-popular backfill and your own posts — an
+   * explicit "only the people I chose" view, which is the whole reason to offer
+   * the toggle.
+   */
+  scope: z.enum(['for_you', 'following', 'saved']).default('for_you'),
+  /** Restricts to posts carrying this hashtag. Normalised, no leading `#`. */
+  tag: z.string().trim().max(48).optional(),
+  /** Restricts to a single author — what the profile "Posts" tab asks for. */
+  authorId: z.string().trim().max(128).optional(),
 });
 export type FeedQuery = z.infer<typeof FeedQuerySchema>;
 

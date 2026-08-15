@@ -17,6 +17,7 @@ import { getInternProfile } from '../profiles/profiles.service.js';
 import { getConnection, isBlockedEitherWay } from '../connections/connections.service.js';
 import { scanForScamPatterns } from '../moderation/scam-detection.js';
 import { autoFlag } from '../moderation/moderation.service.js';
+import { resolveMentions } from '../posts/engagement.service.js';
 import { emit } from '../notifications/events.js';
 
 /** Deterministic for direct threads, so opening a conversation is idempotent. */
@@ -180,12 +181,14 @@ export async function sendMessage(args: SendMessageArgs): Promise<Message> {
   }
 
   const scan = scanForScamPatterns(args.body);
+  const mentions = await resolveMentions(senderId, args.body);
   const ts = nowIso();
 
   const message: Omit<Message, 'id'> = {
     threadId,
     senderId,
     body: args.body,
+    mentions,
     attachments: args.attachments,
     // The sender has trivially read their own message.
     readBy: [senderId],
@@ -239,10 +242,28 @@ export async function sendMessage(args: SendMessageArgs): Promise<Message> {
     void emit({
       accountId: recipientId,
       type: thread.state === 'request' ? 'message_request' : 'message_received',
-      payload: { threadId, messageId: messageRef.id, senderId },
+      payload: {
+        threadId,
+        messageId: messageRef.id,
+        senderId,
+        byAccountId: senderId,
+        preview: args.body.slice(0, 160),
+      },
       urgent: false,
       // FR-503 — muted threads stay in the list but stop pushing.
       suppressPush: thread.mutedBy.includes(recipientId),
+    });
+  }
+
+  // Someone tagged in a message who is not in the thread hears about it once,
+  // as a mention — they cannot read the thread, but "you were mentioned" is
+  // still the honest thing to say. Participants already got the message itself.
+  for (const mention of mentions) {
+    if (mention.accountId === senderId || recipients.includes(mention.accountId)) continue;
+    void emit({
+      accountId: mention.accountId,
+      type: 'mention',
+      payload: { byAccountId: senderId, preview: args.body.slice(0, 160) },
     });
   }
 

@@ -12,6 +12,8 @@ import { docToEntity, serialise } from '../../lib/firestore.js';
 import { notFound } from '../../lib/errors.js';
 import { getInternProfile } from '../profiles/profiles.service.js';
 import { buildRelationshipResolver, followedIds } from '../connections/connections.service.js';
+import { hydratePostAuthors } from '../posts/author-hydration.js';
+import { bookmarkedPostIds, bookmarkedSet, sampleReactors } from '../posts/engagement.service.js';
 import { canMatch, scoreListing } from './matching.js';
 import { filterVisible, rankFeed, resolveReason, type RankablePost } from './ranking.js';
 
@@ -31,21 +33,120 @@ import { filterVisible, rankFeed, resolveReason, type RankablePost } from './ran
 const FEED_CANDIDATE_POOL = 300;
 const FEED_WINDOW_DAYS = 30;
 
+/**
+ * The candidate posts for a request, before any ranking.
+ *
+ * Four shapes, because they answer genuinely different questions. Only the
+ * default one is a *feed* — a hashtag page, an author's posts and the saved
+ * list are all chronological by nature, and ranking them would reorder a list
+ * the user has an exact mental model of. They also cannot share the recency
+ * window: your posts from last year still belong on your profile.
+ */
+async function loadCandidatePosts(
+  accountId: string,
+  query: FeedQuery,
+  now: number,
+): Promise<{ posts: Post[]; ranked: boolean }> {
+  const collection = db().collection(Collections.posts);
+
+  if (query.scope === 'saved') {
+    const ids = await bookmarkedPostIds(accountId, Math.max(query.limit * 3, 60));
+    if (ids.length === 0) return { posts: [], ranked: false };
+
+    const chunks: string[][] = [];
+    for (let i = 0; i < ids.length; i += 30) chunks.push(ids.slice(i, i + 30));
+    const snaps = await Promise.all(
+      chunks.map((chunk) => collection.where('__name__', 'in', chunk).get()),
+    );
+
+    const byId = new Map(
+      snaps
+        .flatMap((snap) => snap.docs)
+        .map((doc) => [doc.id, serialise<Post>({ id: doc.id, ...doc.data() })]),
+    );
+    // Saved order, not post order — a shortlist reads in the order it was built.
+    return { posts: ids.map((id) => byId.get(id)).filter((p): p is Post => Boolean(p)), ranked: false };
+  }
+
+  if (query.authorId) {
+    const snap = await collection
+      .where('authorAccountId', '==', query.authorId)
+      .orderBy('createdAt', 'desc')
+      .limit(query.limit + 1)
+      .get();
+    return {
+      posts: snap.docs.map((d) => serialise<Post>({ id: d.id, ...d.data() })),
+      ranked: false,
+    };
+  }
+
+  if (query.tag) {
+    const snap = await collection
+      .where('tags', 'array-contains', query.tag.replace(/^#/, '').toLowerCase())
+      .orderBy('createdAt', 'desc')
+      .limit(query.limit + 1)
+      .get();
+    return {
+      posts: snap.docs.map((d) => serialise<Post>({ id: d.id, ...d.data() })),
+      ranked: false,
+    };
+  }
+
+  const since = new Date(now - FEED_WINDOW_DAYS * 86_400_000).toISOString();
+  const snap = await collection
+    .where('createdAt', '>=', since)
+    .orderBy('createdAt', 'desc')
+    .limit(FEED_CANDIDATE_POOL)
+    .get();
+
+  return { posts: snap.docs.map((d) => serialise<Post>({ id: d.id, ...d.data() })), ranked: true };
+}
+
+/**
+ * Pulls the engagement numbers a reshare should display.
+ *
+ * A reshare's own counters are permanently zero — its likes and comments live
+ * on the original (see `resolveInteractionTarget`). Showing those zeroes would
+ * make every reshare look ignored, so the original's numbers are copied onto
+ * the card. The reshare still renders as a reshare; only the count is borrowed.
+ */
+async function loadOriginals(posts: Post[]): Promise<Map<string, Post>> {
+  const ids = [
+    ...new Set(
+      posts
+        .map((post) => post.resharedFrom?.postId)
+        .filter((id): id is string => Boolean(id)),
+    ),
+  ];
+  const originals = new Map<string, Post>();
+  if (ids.length === 0) return originals;
+
+  const chunks: string[][] = [];
+  for (let i = 0; i < ids.length; i += 30) chunks.push(ids.slice(i, i + 30));
+
+  const snaps = await Promise.all(
+    chunks.map((chunk) =>
+      db().collection(Collections.posts).where('__name__', 'in', chunk).get(),
+    ),
+  );
+
+  for (const snap of snaps) {
+    for (const doc of snap.docs) {
+      originals.set(doc.id, serialise<Post>({ id: doc.id, ...doc.data() }));
+    }
+  }
+
+  return originals;
+}
+
 /** FR-1007 — the ranked activity feed. */
 export async function getFeed(
   accountId: string,
   query: FeedQuery,
   now = Date.now(),
 ): Promise<{ items: FeedItem[]; hasMore: boolean }> {
-  const since = new Date(now - FEED_WINDOW_DAYS * 86_400_000).toISOString();
-
-  const [postsSnap, resolver, followed, profile, reactionsSnap] = await Promise.all([
-    db()
-      .collection(Collections.posts)
-      .where('createdAt', '>=', since)
-      .orderBy('createdAt', 'desc')
-      .limit(FEED_CANDIDATE_POOL)
-      .get(),
+  const [candidates, resolver, followed, profile, reactionsSnap, saved] = await Promise.all([
+    loadCandidatePosts(accountId, query, now),
     buildRelationshipResolver(accountId),
     followedIds(accountId),
     getInternProfile(accountId).catch(() => null),
@@ -54,12 +155,12 @@ export async function getFeed(
       .where('accountId', '==', accountId)
       .limit(500)
       .get(),
+    bookmarkedSet(accountId),
   ]);
 
   const reactedPostIds = new Set(reactionsSnap.docs.map((d) => d.data().postId as string));
 
-  const candidates: RankablePost[] = postsSnap.docs.map((doc) => {
-    const post = serialise<Post>({ id: doc.id, ...doc.data() });
+  const rankable: RankablePost[] = candidates.posts.map((post) => {
     const relationship = resolver.relationshipTo(post.authorAccountId);
     const reason = resolveReason({
       relationship,
@@ -73,26 +174,71 @@ export async function getFeed(
     return { post, reason, relationship };
   });
 
-  let visible = filterVisible(candidates, resolver.blockedIds);
+  let visible = filterVisible(rankable, resolver.blockedIds);
 
-  // `following` drops the global-popular backfill — an explicit "only people
-  // I chose" view, which is the whole reason to offer the toggle.
+  // `following` is an explicit "only the people I chose" view. That drops the
+  // global-popular backfill *and* your own posts: your feed is where you go to
+  // read other people, and seeing yourself under "Following" reads as a bug
+  // because you do not, in fact, follow yourself.
   if (query.scope === 'following') {
-    visible = visible.filter((item) => item.reason !== 'popular');
+    visible = visible.filter((item) => item.reason !== 'popular' && item.reason !== 'your_post');
   }
 
-  const ranked = rankFeed(visible, now);
-  const page = ranked.slice(0, query.limit);
+  const ordered = candidates.ranked
+    ? rankFeed(visible, now)
+    : visible.map((item) => ({ ...item, score: 0 }));
+
+  const page = ordered.slice(0, query.limit);
+
+  // Author identity and engagement are resolved for the page, not the pool —
+  // ranking discards most of what it reads, and paying to hydrate 300 posts to
+  // render 20 is the kind of cost that never shows up in a single-user test.
+  const [hydrated, originals] = await Promise.all([
+    hydratePostAuthors(page.map((item) => item.post)),
+    loadOriginals(page.map((item) => item.post)),
+  ]);
+
+  const withEngagement = hydrated.map((post) => {
+    const original = post.resharedFrom ? originals.get(post.resharedFrom.postId) : undefined;
+    const interactionPostId = original?.id ?? post.id;
+    return {
+      interactionPostId,
+      post: original
+        ? {
+            ...post,
+            reactionCount: original.reactionCount,
+            commentCount: original.commentCount,
+            shareCount: original.shareCount ?? 0,
+            allowResharing: original.allowResharing,
+          }
+        : post,
+    };
+  });
+
+  const reactors = await sampleReactors(
+    [...new Set(withEngagement.map((entry) => entry.interactionPostId))],
+    accountId,
+  );
 
   return {
-    items: page.map((item) => ({
-      post: item.post,
-      reason: item.reason,
-      relationship: item.relationship,
-      score: item.score,
-      hasReacted: reactedPostIds.has(item.post.id),
-    })),
-    hasMore: ranked.length > query.limit,
+    items: page.map((item, index) => {
+      const entry = withEngagement[index]!;
+      return {
+        post: entry.post,
+        reason: item.reason,
+        relationship: item.relationship,
+        score: item.score,
+        hasReacted: reactedPostIds.has(entry.interactionPostId),
+        isBookmarked: saved.has(item.post.id),
+        isFollowingAuthor:
+          item.post.author.kind === 'company'
+            ? followed.companies.has(item.post.author.id)
+            : followed.accounts.has(item.post.author.id),
+        interactionPostId: entry.interactionPostId,
+        reactors: reactors.get(entry.interactionPostId) ?? [],
+      };
+    }),
+    hasMore: ordered.length > query.limit,
   };
 }
 

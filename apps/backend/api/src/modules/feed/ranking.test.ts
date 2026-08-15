@@ -33,6 +33,7 @@ function post(overrides: Partial<Post> = {}): Post {
     linkUrl: null,
     listingId: null,
     tags: [],
+    mentions: [],
     reactionCount: 0,
     commentCount: 0,
     shareCount: 0,

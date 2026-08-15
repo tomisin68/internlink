@@ -16,6 +16,7 @@ function comment(overrides: Partial<PostComment> & { id: string }): PostComment 
     authorAccountId: 'acc_1',
     body: 'Nice work.',
     parentCommentId: null,
+    mentions: [],
     likeCount: 0,
     replyCount: 0,
     createdAt: '2026-08-15T10:00:00.000Z',

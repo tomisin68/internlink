@@ -5,8 +5,10 @@ import {
   ArrowLeft,
   Briefcase,
   Building2,
+  CalendarDays,
   Check,
   Clock,
+  Flag,
   GraduationCap,
   Link2,
   Lock,
@@ -20,11 +22,16 @@ import { Avatar } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { EmptyState, LoadingScreen } from '@/components/ui/feedback';
 import { ImageLightbox } from '@/components/ui/media-lightbox';
-import { compactCount } from '@/lib/format';
+import { ReportDialog } from '@/components/ui/report-dialog';
+import { cn } from '@/lib/cn';
+import { compactCount, monthYear } from '@/lib/format';
 import { messagingApi, networkApi, profileApiClient, queryKeys } from '@/lib/api-endpoints';
 import { useSession } from '@/features/auth/use-auth';
 import { toast } from '@/lib/stores';
 import { ApiRequestError } from '@/lib/api-client';
+import { ProfilePosts } from './profile-posts';
+
+type Tab = 'about' | 'posts';
 
 /**
  * Someone else's profile — FR-1001, reached by tapping a name or avatar
@@ -39,6 +46,8 @@ export function PublicProfileScreen() {
   const { account } = useSession();
   const navigate = useNavigate();
   const [viewing, setViewing] = useState<{ src: string; alt: string } | null>(null);
+  const [tab, setTab] = useState<Tab>('about');
+  const [reporting, setReporting] = useState(false);
 
   const { data, isLoading, error } = useQuery({
     queryKey: queryKeys.publicProfile(accountId),
@@ -103,23 +112,34 @@ export function PublicProfileScreen() {
         </div>
 
         <div className="px-5 pb-5">
-          <button
-            type="button"
-            onClick={() =>
-              person.photoUrl &&
-              setViewing({ src: person.photoUrl, alt: `${person.displayName}'s photo` })
-            }
-            disabled={!person.photoUrl}
-            aria-label={person.photoUrl ? 'View profile photo' : undefined}
-            className="-mt-9 inline-block cursor-zoom-in rounded-full ring-4 ring-[var(--bg-surface)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--ring)] disabled:cursor-default"
-          >
-            <Avatar
-              name={person.displayName}
-              src={person.photoUrl}
-              size="lg"
-              verified={person.isVerified}
-            />
-          </button>
+          <div className="flex items-end justify-between gap-3">
+            <button
+              type="button"
+              onClick={() =>
+                person.photoUrl &&
+                setViewing({ src: person.photoUrl, alt: `${person.displayName}'s photo` })
+              }
+              disabled={!person.photoUrl}
+              aria-label={person.photoUrl ? 'View profile photo' : undefined}
+              className="-mt-9 inline-block cursor-zoom-in rounded-full ring-4 ring-[var(--bg-surface)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--ring)] disabled:cursor-default"
+            >
+              <Avatar
+                name={person.displayName}
+                src={person.photoUrl}
+                size="lg"
+                verified={person.isVerified}
+              />
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setReporting(true)}
+              className="flex h-9 cursor-pointer items-center gap-1.5 rounded-lg px-2 text-xs font-medium text-fg-subtle transition-colors hover:bg-danger-subtle hover:text-danger-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--ring)]"
+            >
+              <Flag aria-hidden="true" className="size-3.5" />
+              Report
+            </button>
+          </div>
 
           <h1 className="mt-3 text-xl font-bold tracking-tight">{person.displayName}</h1>
 
@@ -152,6 +172,12 @@ export function PublicProfileScreen() {
                 {profile.school}
               </li>
             )}
+            {/* "Been here since March 2024" is a trust signal on a marketplace
+                where a brand-new account is the shape most scams take. */}
+            <li className="flex items-center gap-1.5">
+              <CalendarDays aria-hidden="true" className="size-4" />
+              Joined {monthYear(data.joinedAt)}
+            </li>
           </ul>
 
           <dl className="mt-4 flex flex-wrap gap-x-5 gap-y-1 text-sm">
@@ -161,17 +187,91 @@ export function PublicProfileScreen() {
             <Stat label="posts" value={stats.posts} />
           </dl>
 
-          {person.mutualConnections > 0 && (
-            <p className="mt-2 text-xs text-fg-subtle">
-              {person.mutualConnections} mutual{' '}
-              {person.mutualConnections === 1 ? 'connection' : 'connections'}
-            </p>
-          )}
+          <p className="mt-2 flex flex-wrap items-center gap-x-2 text-xs text-fg-subtle">
+            {person.mutualConnections > 0 && (
+              <span>
+                {person.mutualConnections} mutual{' '}
+                {person.mutualConnections === 1 ? 'connection' : 'connections'}
+              </span>
+            )}
+            {person.followsYou && (
+              <span className="rounded-md bg-surface-sunken px-1.5 py-0.5 font-medium text-fg-muted">
+                Follows you
+              </span>
+            )}
+          </p>
 
           <ProfileActions person={person} />
         </div>
       </article>
 
+      <div
+        role="tablist"
+        aria-label="Profile sections"
+        className="mt-4 flex gap-1 rounded-xl bg-surface-sunken p-1"
+      >
+        {(
+          [
+            { id: 'about', label: 'About' },
+            { id: 'posts', label: `Posts${stats.posts > 0 ? ` · ${stats.posts}` : ''}` },
+          ] as const
+        ).map((entry) => (
+          <button
+            key={entry.id}
+            role="tab"
+            aria-selected={tab === entry.id}
+            onClick={() => setTab(entry.id)}
+            className={cn(
+              'h-9 flex-1 cursor-pointer rounded-lg text-sm font-medium transition-colors duration-[160ms]',
+              'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--ring)]',
+              tab === entry.id ? 'bg-surface text-fg shadow-xs' : 'text-fg-muted hover:text-fg',
+            )}
+          >
+            {entry.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'posts' ? (
+        <ProfilePosts
+          accountId={person.id}
+          viewerId={account?.id ?? ''}
+          emptyTitle={`${person.displayName} has not posted yet`}
+          emptyDescription="When they share an update, it will show up here."
+        />
+      ) : (
+        <AboutTab data={data} />
+      )}
+
+      {viewing && (
+        <ImageLightbox src={viewing.src} alt={viewing.alt} onClose={() => setViewing(null)} />
+      )}
+
+      {reporting && (
+        <ReportDialog
+          targetType="profile"
+          targetId={person.id}
+          subject={`${person.displayName}’s profile`}
+          onClose={() => setReporting(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+function AboutTab({ data }: { data: PublicProfile }) {
+  const { profile } = data;
+
+  const isEmpty =
+    !data.profileHiddenReason &&
+    !profile?.about &&
+    !profile?.skills.length &&
+    !profile?.experience.length &&
+    !profile?.education.length &&
+    !profile?.portfolioLinks.length;
+
+  return (
+    <>
       {data.profileHiddenReason && (
         <section className="panel mt-4 flex items-start gap-3 p-5">
           <Lock aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-fg-subtle" />
@@ -184,6 +284,16 @@ export function PublicProfileScreen() {
             </p>
           </div>
         </section>
+      )}
+
+      {isEmpty && (
+        <div className="panel mt-4">
+          <EmptyState
+            icon={<Briefcase />}
+            title="Nothing here yet"
+            description="This profile has not been filled in."
+          />
+        </div>
       )}
 
       {profile?.about && (
@@ -285,11 +395,7 @@ export function PublicProfileScreen() {
           </ul>
         </section>
       )}
-
-      {viewing && (
-        <ImageLightbox src={viewing.src} alt={viewing.alt} onClose={() => setViewing(null)} />
-      )}
-    </div>
+    </>
   );
 }
 
@@ -350,9 +456,19 @@ function ProfileActions({ person }: { person: PersonSummary }) {
       person.isFollowing
         ? networkApi.unfollowAccount(person.id)
         : networkApi.followAccount(person.id),
-    onSuccess: () => {
+    onSuccess: (result) => {
       refresh();
-      toast.success(person.isFollowing ? 'Unfollowed' : `Following ${person.displayName}`);
+      if (person.isFollowing) {
+        toast.success(`Unfollowed ${person.displayName}`);
+        return;
+      }
+      const mutual = 'mutual' in result && result.mutual;
+      toast.success(
+        mutual
+          ? `You and ${person.displayName} now follow each other`
+          : `Following ${person.displayName}`,
+        mutual ? 'Their posts will show up in your feed.' : undefined,
+      );
     },
     onError: () => toast.error('Could not change that'),
   });
@@ -368,6 +484,14 @@ function ProfileActions({ person }: { person: PersonSummary }) {
       );
     },
   });
+
+  // "Follow back" is a materially easier decision than "Follow", and naming it
+  // is the difference between a prompt and a chore.
+  const followLabel = person.isFollowing
+    ? 'Following'
+    : person.followsYou
+      ? 'Follow back'
+      : 'Follow';
 
   return (
     <div className="mt-4 flex flex-wrap gap-2">
@@ -411,7 +535,7 @@ function ProfileActions({ person }: { person: PersonSummary }) {
         isLoading={toggleFollow.isPending}
         onClick={() => toggleFollow.mutate()}
       >
-        {person.isFollowing ? 'Following' : 'Follow'}
+        {followLabel}
       </Button>
 
       <Button

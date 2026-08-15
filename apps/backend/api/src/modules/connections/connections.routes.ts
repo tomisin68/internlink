@@ -181,16 +181,24 @@ networkRouter.post(
   writeLimiter,
   asyncHandler(async (req, res) => {
     if (!req.auth) throw unauthenticated();
+    const followerId = req.auth.accountId;
     const targetId = param(req, 'accountId');
-    await connections.follow(req.auth.accountId, 'account', targetId);
+
+    // Whether this is a follow *back* has to be answered before the write:
+    // afterwards both directions exist and the two cases are indistinguishable.
+    const theyFollowedFirst = (await connections.followedIds(targetId)).accounts.has(followerId);
+
+    await connections.follow(followerId, 'account', targetId);
 
     void emit({
       accountId: targetId,
-      type: 'new_follower',
-      payload: { byAccountId: req.auth.accountId },
+      type: theyFollowedFirst ? 'follow_back' : 'new_follower',
+      payload: { byAccountId: followerId },
     });
 
-    sendOk(res, { following: true });
+    // The client needs this to say "You and Ada now follow each other" rather
+    // than the flatter "Following Ada" — reciprocation is the interesting part.
+    sendOk(res, { following: true, mutual: theyFollowedFirst });
   }),
 );
 
@@ -304,6 +312,7 @@ networkRouter.post(
       reporterId: req.auth.accountId,
       targetType: input.targetType,
       targetId: input.targetId,
+      parentId: input.parentId ?? null,
       reason: input.reason,
       detail: input.detail,
     });

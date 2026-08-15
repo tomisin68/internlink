@@ -5,9 +5,11 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
 import { ArrowLeft, MapPin, ShieldAlert } from 'lucide-react';
-import type { WorkMode } from '@internlink/shared-types';
+import type { PostMedia, WorkMode } from '@internlink/shared-types';
+import { extractHashtags } from '@internlink/shared-types';
 import { Button } from '@/components/ui/button';
 import { Field, Input, Textarea } from '@/components/ui/field';
+import { MediaPicker } from '@/components/ui/media-picker';
 import { OptionCard } from '@/components/ui/option-card';
 import { TagInput } from '@/components/ui/tag-input';
 import { Alert } from '@/components/ui/feedback';
@@ -37,6 +39,8 @@ export function RoleComposerScreen() {
   const { company } = useSession();
 
   const [skills, setSkills] = useState<string[]>([]);
+  const [media, setMedia] = useState<PostMedia[]>([]);
+  const [tags, setTags] = useState<string[]>([]);
   const [workMode, setWorkMode] = useState<WorkMode>('hybrid');
   const [skillError, setSkillError] = useState<string | null>(null);
 
@@ -52,7 +56,12 @@ export function RoleComposerScreen() {
   });
 
   const description = watch('description') ?? '';
+  const title = watch('title') ?? '';
   const isVerified = company?.verificationStatus === 'verified';
+
+  // Hashtags typed into the copy are merged in server-side; echoing them back
+  // is what stops someone adding the same tag twice.
+  const inlineTags = extractHashtags(`${title} ${description}`);
 
   const create = useMutation({
     mutationFn: (args: { values: ComposerInput; status: 'draft' | 'active' }) =>
@@ -60,6 +69,8 @@ export function RoleComposerScreen() {
         title: args.values.title,
         description: args.values.description,
         skills,
+        media,
+        tags,
         location: args.values.location || null,
         workMode,
         durationMonths: args.values.durationMonths ?? null,
@@ -195,6 +206,29 @@ export function RoleComposerScreen() {
             placeholder="You will join our four-person frontend team building the customer dashboard in React…"
           />
         </Field>
+
+        {/* A role post carries media like any other post. A photo of the team
+            or a walkthrough of the office does more for applications than
+            another paragraph of description. */}
+        <Field
+          label="Photos and video"
+          hint="Optional. Show the team, the office, or the product they would work on."
+        >
+          <MediaPicker value={media} onChange={setMedia} disabled={create.isPending} />
+        </Field>
+
+        <Field
+          label="Topics"
+          hint="Hashtags make the role findable outside search. Anything you type as #tag in the description is added automatically."
+        >
+          <TagInput value={tags} onChange={setTags} max={12} placeholder="remote, design, lagos" />
+        </Field>
+
+        {inlineTags.length > 0 && (
+          <p className="-mt-2 text-xs text-fg-subtle">
+            From your description: {inlineTags.map((tag) => `#${tag}`).join(' ')}
+          </p>
+        )}
 
         <div className="flex flex-wrap items-center gap-2 border-t border-border-subtle pt-4">
           <Button

@@ -122,3 +122,33 @@ services:
         value: https://internlink-2g0u.onrender.com
       - key: CRON_SECRET
         sync: false
+
+  # ---------------------------------------------------------------------------
+  # FR-603 — the batched email digest.
+  #
+  # events.ts has been writing pending_batch / pending_immediate rows since
+  # messaging shipped; this is what finally reads them. Hourly rather than
+  # daily: an urgent event carries a deadline, and waiting up to 24 hours to
+  # send "your interview is tomorrow" defeats the point of marking it urgent.
+  #
+  # Batched events are grouped into one email per account per run, so an hourly
+  # cadence still means at most one digest an hour, not one per event.
+  # ---------------------------------------------------------------------------
+  - type: cron
+    name: internlink-digest
+    runtime: node
+    plan: starter
+    region: frankfurt
+    rootDir: .
+    schedule: '0 * * * *'
+    buildCommand: npm ci
+    startCommand: >-
+      curl -sS -f -X POST "$API_BASE_URL/v1/notifications/jobs/digest"
+      -H "content-type: application/json"
+      -H "x-cron-secret: $CRON_SECRET"
+      -d '{"limit":300}'
+    envVars:
+      - key: API_BASE_URL
+        value: https://internlink-2g0u.onrender.com
+      - key: CRON_SECRET
+        sync: false

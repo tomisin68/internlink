@@ -102,7 +102,11 @@ export const Collections = {
   blocks: 'blocks',
   posts: 'posts',
   postReactions: 'postReactions',
+  /** Saved posts, keyed `{postId}__{accountId}` so saving twice is idempotent. */
+  postBookmarks: 'postBookmarks',
   commentReactions: 'commentReactions',
+  /** FR-1001 — one row per (viewer, subject) pair, not per visit. */
+  profileViews: 'profileViews',
   messageThreads: 'messageThreads',
   /** Subcollection name under a thread document. */
   messages: 'messages',

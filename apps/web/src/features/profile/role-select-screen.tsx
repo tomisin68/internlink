@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { OptionCard } from '@/components/ui/option-card';
 import { Alert } from '@/components/ui/feedback';
 import { Logo } from '@/components/ui/logo';
+import { cn } from '@/lib/cn';
 import { useSelectRole, useSession } from '@/features/auth/use-auth';
 
 type Choice = 'intern' | 'recruiter';
@@ -50,8 +51,20 @@ export function RoleSelectScreen() {
   const [choice, setChoice] = useState<Choice | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  /**
+   * Continue is always pressable, and says what is missing when it is pressed.
+   *
+   * A greyed-out button gives no reason and no feedback: on touch there is no
+   * hover to reveal a tooltip, the press does nothing at all, and people read
+   * that as the app being broken rather than as "pick one first". Letting the
+   * press through and answering it is both more accessible and less confusing —
+   * `aria-disabled` still tells assistive tech the action is not ready.
+   */
   async function handleContinue(): Promise<void> {
-    if (!choice) return;
+    if (!choice) {
+      setError('Pick one of the two above to continue — you can add the other later.');
+      return;
+    }
     setError(null);
     try {
       await selectRole.mutateAsync(choice);
@@ -129,12 +142,14 @@ export function RoleSelectScreen() {
           <Button
             size="lg"
             fullWidth
-            disabled={!choice}
+            aria-disabled={!choice}
             isLoading={selectRole.isPending}
             loadingText="Setting things up…"
             onClick={handleContinue}
             rightIcon={<ArrowRight />}
-            className="sm:w-auto sm:min-w-56"
+            // Dimmed to show it is not ready, but still a real button — see
+            // `handleContinue` for why it is not `disabled`.
+            className={cn('sm:w-auto sm:min-w-56', !choice && 'opacity-60')}
           >
             Continue
           </Button>

@@ -181,6 +181,27 @@ export const ListingSchema = z.object({
   title: z.string().min(1).max(160),
   description: z.string().max(12000),
   skills: z.array(z.string().min(1).max(48)).max(20),
+  /**
+   * Photos and video for the role — an office walkthrough, the team, the
+   * product. Typed loosely here rather than importing `PostMediaSchema`,
+   * because `social.ts` already imports this module and the cycle is not worth
+   * the shared type. `listing-media.ts` keeps the two shapes in step.
+   */
+  media: z
+    .array(
+      z.object({
+        kind: z.enum(['image', 'video']),
+        url: z.string().url(),
+        thumbnailUrl: z.string().url().nullable().default(null),
+        width: z.number().int().positive().nullable().default(null),
+        height: z.number().int().positive().nullable().default(null),
+        durationSeconds: z.number().nonnegative().nullable().default(null),
+      }),
+    )
+    .max(10)
+    .default([]),
+  /** Hashtags, normalised and without the leading `#`. */
+  tags: z.array(z.string().min(1).max(48)).max(12).default([]),
   location: z.string().max(120).nullable(),
   workMode: WorkModeSchema,
   durationMonths: z.number().int().min(1).max(36).nullable(),

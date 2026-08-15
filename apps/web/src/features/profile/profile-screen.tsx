@@ -1,41 +1,58 @@
 import { useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
 import {
+  Bookmark,
   Briefcase,
   Building2,
+  CalendarDays,
   Check,
+  ChevronRight,
   Eye,
   GraduationCap,
   LogOut,
   MapPin,
   Moon,
   Pencil,
+  Shield,
   Sun,
   SunMoon,
 } from 'lucide-react';
+import { Avatar } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
-import { Field, Textarea } from '@/components/ui/field';
-import { TagInput } from '@/components/ui/tag-input';
-import { Alert } from '@/components/ui/feedback';
+import { Alert, EmptyState } from '@/components/ui/feedback';
 import { cn } from '@/lib/cn';
+import { compactCount, longRelativeTime, monthYear } from '@/lib/format';
 import { profileApiClient, queryKeys } from '@/lib/api-endpoints';
 import { useSession, useSignOut } from '@/features/auth/use-auth';
-import { toast, useThemeStore } from '@/lib/stores';
-import { ApiRequestError } from '@/lib/api-client';
+import { useThemeStore } from '@/lib/stores';
 import { CompletenessCard } from './completeness-card';
+import { ProfileEditor } from './profile-editor';
 import { ProfileHeaderEditor } from './profile-header-editor';
+import { ProfilePosts } from './profile-posts';
 import { NotificationSettings } from './notification-settings';
-import { SKILL_SUGGESTIONS } from './constants';
+import { PushPrompt } from './push-prompt';
+
+type Tab = 'profile' | 'posts' | 'views';
 
 export function ProfileScreen() {
   const { account, internProfile, company } = useSession();
   const signOut = useSignOut();
   const [editing, setEditing] = useState(false);
+  const [tab, setTab] = useState<Tab>('profile');
 
   const { data: completeness } = useQuery({
     queryKey: queryKeys.completeness,
     queryFn: profileApiClient.completeness,
     enabled: account?.activeRole === 'intern' && Boolean(internProfile),
+  });
+
+  // The counts live outside the session payload because they change constantly
+  // and the session is cached for the whole visit.
+  const { data: stats } = useQuery({
+    queryKey: queryKeys.profileStats,
+    queryFn: profileApiClient.myStats,
+    enabled: Boolean(account),
   });
 
   if (!account) return null;
@@ -81,136 +98,341 @@ export function ProfileScreen() {
                 {internProfile.school}
               </li>
             )}
+            <li className="flex items-center gap-1.5">
+              <CalendarDays aria-hidden="true" className="size-4" />
+              Joined {monthYear(stats?.joinedAt ?? account.createdAt)}
+            </li>
           </ul>
 
-          {isIntern && internProfile && (
-            <Button
-              size="sm"
-              variant="outline"
-              leftIcon={editing ? <Check /> : <Pencil />}
-              className="mt-4"
-              onClick={() => setEditing((v) => !v)}
+          {/* The same numbers everyone else sees on your profile. Their absence
+              here was the odd part: you were the only person who could not. */}
+          <dl className="mt-4 flex flex-wrap gap-x-5 gap-y-1 text-sm">
+            <Stat label="followers" value={stats?.followers} />
+            <Stat label="following" value={stats?.following} />
+            <Stat label="connections" value={stats?.connections} />
+            <Stat label="posts" value={stats?.posts} />
+          </dl>
+
+          <div className="mt-4 flex flex-wrap gap-2">
+            {isIntern && internProfile && (
+              <Button
+                size="sm"
+                variant="outline"
+                leftIcon={editing ? <Check /> : <Pencil />}
+                onClick={() => {
+                  setEditing((v) => !v);
+                  setTab('profile');
+                }}
+              >
+                {editing ? 'Done editing' : 'Edit profile'}
+              </Button>
+            )}
+            <Link
+              to={`/u/${account.id}`}
+              className="flex h-9 items-center gap-1.5 rounded-lg px-3 text-sm font-medium text-fg-muted transition-colors hover:bg-surface-sunken hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--ring)]"
             >
-              {editing ? 'Done editing' : 'Edit profile'}
-            </Button>
-          )}
+              <Eye aria-hidden="true" className="size-4" />
+              View as others see it
+            </Link>
+          </div>
         </div>
       </article>
 
-      {/* FR-202 — what is missing, ranked by how much it matters. */}
-      {isIntern && completeness && (
-        <CompletenessCard
-          score={completeness.score}
-          missing={completeness.missing}
-          // Every remaining item except the photo is edited in the panel below,
-          // and the photo has its own control in the header.
-          onAction={(key) => {
-            if (key !== 'photo') setEditing(true);
-          }}
+      <PushPrompt />
+
+      {!editing && (
+        <div
+          role="tablist"
+          aria-label="Profile sections"
+          className="mt-4 flex gap-1 rounded-xl bg-surface-sunken p-1"
+        >
+          {(
+            [
+              { id: 'profile', label: 'Profile' },
+              { id: 'posts', label: `Posts${stats?.posts ? ` · ${stats.posts}` : ''}` },
+              { id: 'views', label: 'Viewers' },
+            ] as const
+          ).map((entry) => (
+            <button
+              key={entry.id}
+              role="tab"
+              aria-selected={tab === entry.id}
+              onClick={() => setTab(entry.id)}
+              className={cn(
+                'h-9 flex-1 cursor-pointer rounded-lg text-sm font-medium transition-colors duration-[160ms]',
+                'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--ring)]',
+                tab === entry.id ? 'bg-surface text-fg shadow-xs' : 'text-fg-muted hover:text-fg',
+              )}
+            >
+              {entry.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {editing && isIntern && internProfile && (
+        <ProfileEditor profile={internProfile} onDone={() => setEditing(false)} />
+      )}
+
+      {!editing && tab === 'posts' && (
+        <ProfilePosts
+          accountId={account.id}
+          viewerId={account.id}
+          emptyTitle="You have not posted yet"
+          emptyDescription="Share an update from your feed and it will show up here."
         />
       )}
 
-      {isIntern && internProfile && editing && <EditPanel />}
+      {!editing && tab === 'views' && <ProfileViewers />}
 
-      {isIntern && internProfile && !editing && (
+      {!editing && tab === 'profile' && (
         <>
-          {internProfile.about && (
-            <section className="panel mt-4 p-5">
-              <h2 className="mb-2 text-sm font-semibold text-fg">About</h2>
-              <p className="text-sm leading-relaxed whitespace-pre-wrap text-fg-muted text-pretty">
-                {internProfile.about}
-              </p>
-            </section>
+          {/* FR-202 — what is missing, ranked by how much it matters. */}
+          {isIntern && completeness && (
+            <CompletenessCard
+              score={completeness.score}
+              missing={completeness.missing}
+              // Every remaining item except the photo is edited in the panel
+              // below, and the photo has its own control in the header.
+              onAction={(key) => {
+                if (key !== 'photo') setEditing(true);
+              }}
+            />
           )}
 
-          {internProfile.skills.length > 0 && (
-            <section className="panel mt-4 p-5">
-              <h2 className="mb-2.5 text-sm font-semibold text-fg">Skills</h2>
-              <ul className="flex flex-wrap gap-1.5">
-                {internProfile.skills.map((skill) => (
-                  <li
-                    key={skill}
-                    className="rounded-lg bg-brand-subtle px-2.5 py-1 text-sm font-medium text-brand-fg"
+          {isIntern && internProfile && (
+            <>
+              {internProfile.about && (
+                <section className="panel mt-4 p-5">
+                  <h2 className="mb-2 text-sm font-semibold text-fg">About</h2>
+                  <p className="text-sm leading-relaxed whitespace-pre-wrap text-fg-muted text-pretty">
+                    {internProfile.about}
+                  </p>
+                </section>
+              )}
+
+              {internProfile.skills.length > 0 && (
+                <section className="panel mt-4 p-5">
+                  <h2 className="mb-2.5 text-sm font-semibold text-fg">Skills</h2>
+                  <ul className="flex flex-wrap gap-1.5">
+                    {internProfile.skills.map((skill) => (
+                      <li
+                        key={skill}
+                        className="rounded-lg bg-brand-subtle px-2.5 py-1 text-sm font-medium text-brand-fg"
+                      >
+                        {skill}
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              )}
+
+              {internProfile.experience.length > 0 && (
+                <section className="panel mt-4 p-5">
+                  <h2 className="mb-3 text-sm font-semibold text-fg">Experience</h2>
+                  <ul className="flex flex-col gap-4">
+                    {internProfile.experience.map((entry) => (
+                      <li key={entry.id} className="flex gap-3">
+                        <span className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-lg bg-surface-sunken text-fg-subtle">
+                          <Briefcase aria-hidden="true" className="size-4" />
+                        </span>
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-fg">{entry.title}</p>
+                          <p className="text-sm text-fg-muted">{entry.company}</p>
+                          <p className="mt-0.5 text-xs text-fg-subtle">
+                            {entry.startDate} —{' '}
+                            {entry.isCurrent ? 'Present' : (entry.endDate ?? 'Present')}
+                          </p>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              )}
+
+              {internProfile.education.length > 0 && (
+                <section className="panel mt-4 p-5">
+                  <h2 className="mb-3 text-sm font-semibold text-fg">Education</h2>
+                  <ul className="flex flex-col gap-4">
+                    {internProfile.education.map((entry) => (
+                      <li key={entry.id} className="flex gap-3">
+                        <span className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-lg bg-surface-sunken text-fg-subtle">
+                          <GraduationCap aria-hidden="true" className="size-4" />
+                        </span>
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-fg">{entry.school}</p>
+                          {(entry.degree || entry.fieldOfStudy) && (
+                            <p className="text-sm text-fg-muted">
+                              {[entry.degree, entry.fieldOfStudy].filter(Boolean).join(', ')}
+                            </p>
+                          )}
+                          <p className="mt-0.5 text-xs text-fg-subtle tabular-nums">
+                            {entry.startYear} — {entry.endYear ?? 'Present'}
+                          </p>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              )}
+
+              {internProfile.cvUrl && (
+                <section className="panel mt-4 p-5">
+                  <h2 className="mb-2 text-sm font-semibold text-fg">CV</h2>
+                  <a
+                    href={internProfile.cvUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-sm text-brand-fg underline-offset-4 hover:underline"
                   >
-                    {skill}
-                  </li>
-                ))}
-              </ul>
-            </section>
+                    {internProfile.cvFileName ?? 'View your CV'}
+                  </a>
+                </section>
+              )}
+
+              {/* FR-1004 — visible to recruiters only, never broadcast. */}
+              {internProfile.openToOpportunities && (
+                <Alert variant="success" className="mt-4">
+                  <span className="flex items-center gap-1.5">
+                    <Eye aria-hidden="true" className="size-4" />
+                    Open to opportunities — recruiters can see this; nobody else can.
+                  </span>
+                </Alert>
+              )}
+            </>
           )}
 
-          {/* FR-1004 — visible to recruiters only, never broadcast. */}
-          {internProfile.openToOpportunities && (
-            <Alert variant="success" className="mt-4">
-              <span className="flex items-center gap-1.5">
-                <Eye aria-hidden="true" className="size-4" />
-                Open to opportunities — recruiters can see this; nobody else can.
-              </span>
-            </Alert>
-          )}
+          {/* The bottom bar is capped at five destinations, so these live here
+              on mobile. On desktop they are in the rail. */}
+          <nav aria-label="More" className="panel mt-4 divide-y divide-border-subtle">
+            <MoreLink to="/feed?scope=saved" icon={<Bookmark />} label="Saved posts" />
+            <MoreLink to="/companies" icon={<Building2 />} label="Companies" />
+            {account.activeRole === 'recruiter' && company && (
+              <MoreLink to={`/c/${company.id}`} icon={<Building2 />} label="Your company page" />
+            )}
+            {account.activeRole === 'admin' && (
+              <MoreLink to="/admin/moderation" icon={<Shield />} label="Moderation" />
+            )}
+          </nav>
+
+          <NotificationSettings />
+
+          <SettingsPanel onSignOut={() => void signOut()} />
         </>
       )}
-
-      <NotificationSettings />
-
-      <SettingsPanel onSignOut={() => void signOut()} />
     </div>
   );
 }
 
-function EditPanel() {
-  const { internProfile } = useSession();
-  const queryClient = useQueryClient();
-  const [about, setAbout] = useState(internProfile?.about ?? '');
-  const [skills, setSkills] = useState<string[]>(internProfile?.skills ?? []);
-
-  const save = useMutation({
-    mutationFn: () => profileApiClient.updateIntern({ about: about || null, skills }),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['profiles'] });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.session });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.matches });
-      toast.success('Profile updated', 'Your matches will refresh with the change.');
-    },
-    onError: (error) => {
-      toast.error(
-        'Could not save',
-        error instanceof ApiRequestError ? error.message : 'Try again in a moment.',
-      );
-    },
+/**
+ * FR-1001 — who looked at your profile.
+ *
+ * Names rather than a bare count, because "12 people viewed your profile" is a
+ * number you can do nothing with, and the point of the feature is that one of
+ * them might be worth messaging.
+ */
+function ProfileViewers() {
+  const { data, isLoading } = useQuery({
+    queryKey: queryKeys.profileViews,
+    queryFn: profileApiClient.myViews,
   });
 
-  return (
-    <section className="panel mt-4 flex flex-col gap-5 p-5">
-      <Field
-        label="About"
-        hint="A short paragraph. What you are working on, what you want to learn."
-        labelAccessory={
-          <span className="text-xs text-fg-subtle tabular-nums">{about.length}/2600</span>
-        }
-      >
-        <Textarea
-          value={about}
-          onChange={(e) => setAbout(e.target.value)}
-          rows={5}
-          maxLength={2600}
+  if (isLoading) {
+    return (
+      <div className="mt-4 flex flex-col gap-2">
+        {[0, 1, 2].map((i) => (
+          <div key={i} className="skeleton h-16 w-full rounded-xl" />
+        ))}
+      </div>
+    );
+  }
+
+  if (!data || data.viewers.length === 0) {
+    return (
+      <div className="panel mt-4">
+        <EmptyState
+          icon={<Eye />}
+          title="No profile views yet"
+          description="When someone opens your profile, they will show up here."
         />
-      </Field>
+      </div>
+    );
+  }
 
-      <Field label="Skills" hint="These drive your matches — keep them current." required>
-        <TagInput value={skills} onChange={setSkills} suggestions={SKILL_SUGGESTIONS} max={30} />
-      </Field>
-
-      <Button
-        onClick={() => save.mutate()}
-        isLoading={save.isPending}
-        disabled={skills.length < 3}
-        title={skills.length < 3 ? 'At least three skills are needed for matching' : undefined}
-        className="self-start"
-      >
-        Save changes
-      </Button>
+  return (
+    <section className="mt-4">
+      <p className="mb-2 text-sm text-fg-muted">
+        {data.total} {data.total === 1 ? 'person' : 'people'} in the last {data.windowDays} days.
+      </p>
+      <ul className="flex flex-col gap-2">
+        {data.viewers.map((viewer) => (
+          <li key={viewer.person.id}>
+            <Link
+              to={`/u/${viewer.person.id}`}
+              className="panel flex items-center gap-3 p-3 transition-colors hover:border-brand-border focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--ring)]"
+            >
+              <Avatar
+                name={viewer.person.displayName}
+                src={viewer.person.photoUrl}
+                size="md"
+                verified={viewer.person.isVerified}
+              />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-semibold text-fg">
+                  {viewer.person.displayName}
+                </span>
+                {viewer.person.headline && (
+                  <span className="block truncate text-xs text-fg-subtle">
+                    {viewer.person.headline}
+                  </span>
+                )}
+                <span className="mt-0.5 block text-2xs text-fg-faint">
+                  {longRelativeTime(viewer.viewedAt)}
+                  {viewer.count > 1 && ` · ${viewer.count} times`}
+                </span>
+              </span>
+            </Link>
+          </li>
+        ))}
+      </ul>
     </section>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: number | undefined }) {
+  return (
+    <div className="flex items-baseline gap-1">
+      <dt className="sr-only">{label}</dt>
+      <dd className="text-sm font-semibold text-fg tabular-nums">
+        {value === undefined ? '—' : compactCount(value)}
+      </dd>
+      <span aria-hidden="true" className="text-sm text-fg-subtle">
+        {label}
+      </span>
+    </div>
+  );
+}
+
+function MoreLink({
+  to,
+  icon,
+  label,
+}: {
+  to: string;
+  icon: React.ReactNode;
+  label: string;
+}) {
+  return (
+    <Link
+      to={to}
+      className="flex items-center gap-3 px-5 py-3.5 text-sm font-medium text-fg transition-colors hover:bg-surface-sunken focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--ring)]"
+    >
+      <span aria-hidden="true" className="text-fg-subtle [&>svg]:size-4.5">
+        {icon}
+      </span>
+      {label}
+      <ChevronRight aria-hidden="true" className="ml-auto size-4 text-fg-faint" />
+    </Link>
   );
 }
 

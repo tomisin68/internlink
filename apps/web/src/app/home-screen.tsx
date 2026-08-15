@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/feedback';
 import { ProgressRing } from '@/components/ui/stepper';
 import { useSession } from '@/features/auth/use-auth';
-import { feedApi, messagingApi, queryKeys } from '@/lib/api-endpoints';
+import { feedApi, listingsApi, messagingApi, profileApiClient, queryKeys } from '@/lib/api-endpoints';
 
 /**
  * The landing screen inside the shell.
@@ -26,6 +26,21 @@ export function HomeScreen() {
     queryKey: queryKeys.matches,
     queryFn: () => feedApi.getMatches(3),
     enabled: isIntern,
+  });
+
+  // The network and roles tiles used to be hardcoded zeroes, which made the
+  // whole row read as broken — a stat card that never moves is worse than no
+  // stat card, because it looks like the product is not counting.
+  const { data: stats } = useQuery({
+    queryKey: queryKeys.profileStats,
+    queryFn: profileApiClient.myStats,
+    enabled: Boolean(account),
+  });
+
+  const { data: myRoles } = useQuery({
+    queryKey: queryKeys.myListings,
+    queryFn: listingsApi.mine,
+    enabled: Boolean(account) && !isIntern,
   });
 
   if (!account) return null;
@@ -82,9 +97,25 @@ export function HomeScreen() {
             hint="roles for you"
           />
         ) : (
-          <StatCard to="/roles" icon={<Briefcase />} label="Roles" value={0} hint="posted" />
+          <StatCard
+            to="/roles"
+            icon={<Briefcase />}
+            label="Roles"
+            value={myRoles?.items.length ?? 0}
+            hint="posted"
+          />
         )}
-        <StatCard to="/network" icon={<Users />} label="Network" value={0} hint="connections" />
+        <StatCard
+          to="/network"
+          icon={<Users />}
+          label="Network"
+          value={stats?.connections ?? 0}
+          hint={
+            (stats?.followers ?? 0) > 0
+              ? `${stats?.followers} follower${stats?.followers === 1 ? '' : 's'}`
+              : 'connections'
+          }
+        />
       </div>
 
       {/* ------------------------------------------------------ top match -- */}

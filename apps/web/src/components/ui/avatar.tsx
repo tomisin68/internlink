@@ -3,6 +3,8 @@ import { cn } from '@/lib/cn';
 import { initialsFrom } from '@/lib/format';
 
 const SIZES = {
+  /** Overlapping stacks only — the "liked by" row, not a standalone avatar. */
+  '2xs': 'size-5 text-[0.5rem]',
   xs: 'size-7 text-2xs',
   sm: 'size-9 text-xs',
   md: 'size-11 text-sm',
@@ -54,7 +56,10 @@ export function Avatar({
           <BadgeCheck
             aria-label="Verified"
             role="img"
-            className={cn('text-success', size === 'xs' || size === 'sm' ? 'size-3.5' : 'size-4')}
+            className={cn(
+              'text-success',
+              size === '2xs' || size === 'xs' || size === 'sm' ? 'size-3.5' : 'size-4',
+            )}
             strokeWidth={2.5}
           />
         </span>

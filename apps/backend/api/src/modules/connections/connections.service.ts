@@ -359,6 +359,28 @@ export async function followedCompanyIds(accountId: string): Promise<Set<string>
   return (await followedIds(accountId)).companies;
 }
 
+/**
+ * Who follows this account.
+ *
+ * Bounded, and deliberately so: the only consumer is the "Follow back" state on
+ * a list of people, where the question is "is this person in my followers?" A
+ * full follower list belongs behind its own paginated route, not inside every
+ * directory render.
+ */
+export async function followerIds(targetId: string, limit = 1000): Promise<Set<string>> {
+  const snap = await db()
+    .collection(Collections.follows)
+    .where('targetId', '==', targetId)
+    .limit(limit)
+    .get();
+
+  return new Set(
+    snap.docs
+      .map((d) => d.data().followerId as string | undefined)
+      .filter((id): id is string => Boolean(id)),
+  );
+}
+
 export async function followerCount(targetId: string): Promise<number> {
   const snap = await db()
     .collection(Collections.follows)

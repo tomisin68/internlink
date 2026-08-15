@@ -166,6 +166,20 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Saved posts. Same shape again — yours are yours to read, and the write
+    // goes through the API so a bookmark cannot be planted on someone else.
+    match /postBookmarks/{bookmarkId} {
+      allow get, list: if canRead() && resource.data.accountId == uid();
+      allow write: if false;
+    }
+
+    // FR-1001 — profile views. Closed to clients in both directions: the
+    // subject reads their own viewer list through the API, which redacts
+    // blocked accounts, and nobody may read who *they* have been looking at.
+    match /profileViews/{viewId} {
+      allow read, write: if false;
+    }
+
     // ------------------------------------------------------------ messaging --
     // This is the reason client reads exist at all. A participant subscribes to
     // their thread and its messages, and the UI updates live instead of polling.

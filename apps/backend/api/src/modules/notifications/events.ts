@@ -1,6 +1,7 @@
 import { Collections, db } from '../../config/firebase.js';
 import { nowIso } from '../../lib/firestore.js';
 import { logger } from '../../lib/logger.js';
+import { dispatchPush } from './dispatch.service.js';
 
 /**
  * FR-601 — every notification-triggering event is emitted here.
@@ -28,7 +29,13 @@ export type NotificationType =
   | 'post_comment'
   | 'post_reshare'
   | 'comment_reaction'
+  /** FR-1007 — someone tagged you in a post, a comment or a message. */
+  | 'mention'
   | 'new_follower'
+  /** Someone you followed followed you back. Worth its own copy. */
+  | 'follow_back'
+  /** FR-1001 — somebody looked at your profile. Durable only, never pushed. */
+  | 'profile_view'
   | 'new_post_from_following'
   | 'reengagement'
   | 'company_verified'
@@ -74,6 +81,17 @@ export async function emit(args: EmitArgs): Promise<void> {
         readAt: null,
         createdAt: nowIso(),
       });
+
+    // FR-601 — push the ones people expect to feel immediately, so a
+    // notification arrives whether or not the app is open. Detached: the
+    // durable row is already written, and the bell is correct without this.
+    // `dispatch.service` decides which types earn an interruption.
+    void dispatchPush({
+      accountId: args.accountId,
+      type: args.type,
+      payload: args.payload,
+      suppressPush: args.suppressPush,
+    });
   } catch (error) {
     logger.error(
       { err: error, type: args.type, accountId: args.accountId },
