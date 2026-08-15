@@ -11,21 +11,13 @@ import { requestContext } from './middleware/request-context.js';
 import { errorHandler, notFoundHandler } from './middleware/error-handler.js';
 import { globalLimiter } from './middleware/rate-limit.js';
 import { apiRouter } from './routes.js';
+import { shareRouter } from './modules/share/share.routes.js';
+import { allowedWebOrigins } from './lib/origins.js';
 
-function allowedCorsOrigins(): Set<string> {
-  const origins = new Set(env.CORS_ORIGINS);
-
-  if (env.FIREBASE_PROJECT_ID) {
-    origins.add(`https://${env.FIREBASE_PROJECT_ID}.web.app`);
-    origins.add(`https://${env.FIREBASE_PROJECT_ID}.firebaseapp.com`);
-  }
-
-  return origins;
-}
 
 export function createApp(): Express {
   const app = express();
-  const corsOrigins = allowedCorsOrigins();
+  const corsOrigins = allowedWebOrigins();
 
   // Behind a load balancer (§5.3) req.ip must come from X-Forwarded-For, or
   // every rate limit keys on the balancer's address and throttles everyone at
@@ -77,6 +69,16 @@ export function createApp(): Express {
   app.use(globalLimiter);
 
   app.use(`/${env.API_VERSION}`, apiRouter);
+
+  /**
+   * Share pages, unversioned and unauthenticated.
+   *
+   * These are public human- and crawler-facing URLs, not API calls: the web
+   * host rewrites /p/:id here so a link unfurls with the post's own title and
+   * media instead of the SPA's generic shell. Putting `/v1/` in a link people
+   * paste into WhatsApp would be a version number we could then never change.
+   */
+  app.use('/', shareRouter);
 
   // Unversioned alias so uptime monitors don't need to know the API version.
   app.get('/health', (_req, res) => {

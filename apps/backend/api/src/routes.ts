@@ -13,6 +13,7 @@ import { messagingRouter } from './modules/messaging/messaging.routes.js';
 import { networkRouter } from './modules/connections/connections.routes.js';
 import { feedRouter } from './modules/feed/feed.routes.js';
 import { notificationsRouter } from './modules/notifications/notifications.routes.js';
+import { shareRouter } from './modules/share/share.routes.js';
 
 const startedAt = Date.now();
 
@@ -64,3 +65,7 @@ apiRouter.use('/messages', messagingRouter);
 apiRouter.use('/network', networkRouter);
 apiRouter.use('/feed', feedRouter);
 apiRouter.use('/notifications', notificationsRouter);
+// Share pages are mounted at the API root as well (see app.ts) — a public,
+// permanent link should not carry an API version in it. Kept here too so a
+// versioned client can still reach them.
+apiRouter.use('/share', shareRouter);

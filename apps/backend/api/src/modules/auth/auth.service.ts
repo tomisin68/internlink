@@ -122,6 +122,7 @@ export async function exchangeSession(args: {
       lastName,
       displayName: [firstName, lastName].filter(Boolean).join(' ') || args.email.split('@')[0]!,
       photoUrl: args.photoUrl ?? null,
+      bannerUrl: null,
       // Empty until the user picks on the role screen. `computeNextStep` reads
       // this emptiness as "send them to select_role".
       roles: [],
@@ -179,6 +180,41 @@ export async function exchangeSession(args: {
   await accountRef.update(patch);
 
   const merged: Account = { ...account, ...(patch as Partial<Account>) };
+  return buildSession(merged);
+}
+
+/**
+ * Updates the profile photo and cover image.
+ *
+ * `undefined` leaves a field alone; `null` clears it. That distinction is the
+ * whole point of the endpoint — "remove my banner" and "I only changed my
+ * photo" have to be expressible in the same request shape.
+ */
+export async function updateAccountImages(
+  accountId: string,
+  input: { photoUrl?: string | null; bannerUrl?: string | null },
+): Promise<SessionPayload> {
+  const account = await getAccount(accountId);
+  if (!account) throw notFound('Your account');
+
+  const patch: Record<string, unknown> = { updatedAt: nowIso() };
+  if (input.photoUrl !== undefined) patch.photoUrl = input.photoUrl;
+  if (input.bannerUrl !== undefined) patch.bannerUrl = input.bannerUrl;
+
+  await db().collection(Collections.accounts).doc(accountId).update(patch);
+
+  const merged: Account = { ...account, ...(patch as Partial<Account>) };
+
+  // Keeps the Firebase user record in step, so anything reading the provider
+  // record directly (console, exports) sees the same avatar.
+  if (input.photoUrl !== undefined) {
+    await firebaseAuth()
+      .updateUser(accountId, { photoURL: input.photoUrl ?? null })
+      .catch((error: unknown) => {
+        logger.warn({ err: error, accountId }, 'Could not mirror photo to the auth record');
+      });
+  }
+
   return buildSession(merged);
 }
 

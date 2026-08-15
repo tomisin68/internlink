@@ -209,6 +209,20 @@ export const CreateRecruiterProfileSchema = z.object({
 });
 export type CreateRecruiterProfileInput = z.infer<typeof CreateRecruiterProfileSchema>;
 
+/**
+ * The images on the profile header, editable from the profile screen itself.
+ *
+ * Separate from the profile wizards on purpose: changing your photo is a
+ * one-tap action people expect to do from their own profile, not something
+ * worth re-entering a four-step wizard for. `null` clears; omitted leaves alone,
+ * which is why both are `.nullable().optional()` rather than just nullable.
+ */
+export const UpdateAccountImagesSchema = z.object({
+  photoUrl: z.string().url().nullable().optional(),
+  bannerUrl: z.string().url().nullable().optional(),
+});
+export type UpdateAccountImagesInput = z.infer<typeof UpdateAccountImagesSchema>;
+
 /** FR-104 — picking a role after sign-up, or adding the second one later. */
 export const SelectRoleSchema = z.object({
   role: z.enum(['intern', 'recruiter']),

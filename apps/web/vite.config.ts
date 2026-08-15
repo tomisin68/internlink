@@ -17,7 +17,12 @@ export default defineConfig(({ mode }) => {
         // under someone who is halfway through the profile wizard loses their
         // form state. We show a "new version available" toast instead.
         injectRegister: 'auto',
-        includeAssets: ['favicon.svg', 'icons/apple-touch-icon.png', 'offline.html'],
+        includeAssets: [
+          'favicon.svg',
+          'icons/apple-touch-icon.png',
+          'offline.html',
+          'push-sw.js',
+        ],
         manifest: {
           id: '/',
           name: 'InternLink — Internships & Entry-Level Roles',
@@ -52,6 +57,18 @@ export default defineConfig(({ mode }) => {
           ],
         },
         workbox: {
+          /**
+           * Push handling is bolted onto the generated worker rather than
+           * replacing it.
+           *
+           * `injectManifest` would let us own the whole file, but then every
+           * runtime route below would have to be hand-written. Importing our
+           * script keeps Workbox doing precaching and caching while push-sw.js
+           * adds the notification handlers. It has to be one worker: FCM's
+           * default `firebase-messaging-sw.js` would be a second registration
+           * at the same scope, and whichever landed last would win.
+           */
+          importScripts: ['/push-sw.js'],
           globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
           cleanupOutdatedCaches: true,
           navigateFallback: '/index.html',

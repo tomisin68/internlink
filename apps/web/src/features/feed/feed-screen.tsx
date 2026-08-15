@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Link } from 'react-router-dom';
@@ -10,6 +10,7 @@ import {
   MoreHorizontal,
   Repeat2,
   Send,
+  Share2,
   Sparkles,
   Trash2,
   Users,
@@ -19,10 +20,13 @@ import { Avatar } from '@/components/ui/avatar';
 import { Button, LinkButton } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/feedback';
 import { MediaCarousel } from '@/components/ui/media-carousel';
+import { MediaLightbox, type LightboxItem } from '@/components/ui/media-lightbox';
 import { MediaPicker } from '@/components/ui/media-picker';
 import { cn } from '@/lib/cn';
 import { compactCount, relativeTime } from '@/lib/format';
 import { feedApi, queryKeys } from '@/lib/api-endpoints';
+import { postPath, postShareUrl } from '@/lib/post-link';
+import { sharePost } from '@/lib/share';
 import { useSession } from '@/features/auth/use-auth';
 import { toast } from '@/lib/stores';
 import { ApiRequestError } from '@/lib/api-client';
@@ -47,14 +51,52 @@ const REASON_LABEL: Record<FeedReason, { text: string; icon: typeof Users }> = {
 
 type Scope = 'for_you' | 'following';
 
+/** The media a post actually renders — a reshare shows the original's. */
+function displayMedia(item: FeedItem): PostMedia[] {
+  return item.post.resharedFrom ? item.post.resharedFrom.media : (item.post.media ?? []);
+}
+
 export function FeedScreen() {
   const [scope, setScope] = useState<Scope>('for_you');
+  const [lightboxAt, setLightboxAt] = useState<number | null>(null);
   const { account } = useSession();
 
   const { data, isLoading } = useQuery({
     queryKey: queryKeys.feed(scope),
     queryFn: () => feedApi.getFeed(scope),
   });
+
+  /**
+   * Every piece of media in the feed, flattened into one column.
+   *
+   * The viewer is built from the whole feed rather than from one post so that
+   * swiping up keeps going past the post you opened. `offsets` maps a post back
+   * to where its first item lands, which is what lets a card open the viewer at
+   * the right place without knowing anything about the others.
+   */
+  const { lightboxItems, offsets } = useMemo(() => {
+    const flat: LightboxItem[] = [];
+    const starts = new Map<string, number>();
+
+    for (const item of data?.items ?? []) {
+      const media = displayMedia(item);
+      if (media.length === 0) continue;
+
+      starts.set(item.post.id, flat.length);
+      const source = item.post.resharedFrom ?? item.post;
+
+      for (const entry of media) {
+        flat.push({
+          media: entry,
+          author: source.author,
+          postId: item.post.id,
+          caption: source.body,
+        });
+      }
+    }
+
+    return { lightboxItems: flat, offsets: starts };
+  }, [data]);
 
   return (
     <div className="mx-auto w-full max-w-2xl px-4 py-6 sm:px-0">
@@ -120,10 +162,27 @@ export function FeedScreen() {
       <ul className="mt-5 flex flex-col gap-4">
         <AnimatePresence initial={false}>
           {data?.items.map((item) => (
-            <PostCard key={item.post.id} item={item} viewerId={account?.id ?? ''} scope={scope} />
+            <PostCard
+              key={item.post.id}
+              item={item}
+              viewerId={account?.id ?? ''}
+              scope={scope}
+              onOpenMedia={(localIndex) => {
+                const start = offsets.get(item.post.id);
+                if (start !== undefined) setLightboxAt(start + localIndex);
+              }}
+            />
           ))}
         </AnimatePresence>
       </ul>
+
+      {lightboxAt !== null && lightboxItems.length > 0 && (
+        <MediaLightbox
+          items={lightboxItems}
+          startIndex={lightboxAt}
+          onClose={() => setLightboxAt(null)}
+        />
+      )}
     </div>
   );
 }
@@ -300,10 +359,12 @@ function PostCard({
   item,
   viewerId,
   scope,
+  onOpenMedia,
 }: {
   item: FeedItem;
   viewerId: string;
   scope: Scope;
+  onOpenMedia: (localIndex: number) => void;
 }) {
   const queryClient = useQueryClient();
   const [showComments, setShowComments] = useState(false);
@@ -406,10 +467,13 @@ function PostCard({
             media={quoted.media}
             createdAt={quoted.createdAt}
             postId={quoted.postId}
+            onOpenMedia={onOpenMedia}
           />
         ) : (
           <>
-            {media.length > 0 && <MediaCarousel media={media} className="mt-3" />}
+            {media.length > 0 && (
+              <MediaCarousel media={media} className="mt-3" onOpen={onOpenMedia} />
+            )}
             {legacyImage && (
               <img
                 src={legacyImage}
@@ -469,6 +533,25 @@ function PostCard({
             />
           )}
 
+          {/* Sharing a link is not the same as resharing into the feed, so it
+              stays available even when the author has turned resharing off —
+              the post is already visible to whoever can see this card. */}
+          <ActionButton
+            label="Share a link to this post"
+            count={0}
+            isActive={false}
+            activeClassName=""
+            onClick={() => {
+              const source = quoted ?? post;
+              void sharePost({
+                url: postShareUrl(quoted ? quoted.postId : post.id),
+                authorName: source.author.name,
+                body: source.body,
+              });
+            }}
+            icon={<Share2 className="size-4" />}
+          />
+
           {isMine && <span className="ml-auto text-2xs text-fg-faint">Yours</span>}
         </footer>
       </article>
@@ -525,12 +608,14 @@ function QuotedPost({
   media,
   createdAt,
   postId,
+  onOpenMedia,
 }: {
   author: PostAuthor;
   body: string;
   media: PostMedia[];
   createdAt: string;
   postId: string;
+  onOpenMedia: (localIndex: number) => void;
 }) {
   return (
     <article className="mt-3 overflow-hidden rounded-xl border border-border-default bg-surface-sunken">
@@ -571,12 +656,16 @@ function QuotedPost({
         </p>
       )}
 
-      {media.length > 0 && <MediaCarousel media={media} className="mt-2 px-3 pb-3" />}
-      {media.length === 0 && <div className="pb-3" />}
+      {media.length > 0 && (
+        <MediaCarousel media={media} className="mt-2 px-3 pb-3" onOpen={onOpenMedia} />
+      )}
 
-      {/* The original is not routable yet — this keeps the reference visible
-          without linking somewhere that does not resolve. */}
-      <span className="sr-only">Reshared post {postId}</span>
+      <Link
+        to={postPath(postId)}
+        className="block px-3 pb-3 text-2xs font-medium text-fg-subtle underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--ring)]"
+      >
+        See original post
+      </Link>
     </article>
   );
 }

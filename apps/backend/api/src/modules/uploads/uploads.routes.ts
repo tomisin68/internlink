@@ -95,6 +95,14 @@ export const UPLOAD_RULES: Record<
     formats: ['jpg', 'jpeg', 'png', 'webp', 'gif', 'heic', 'mp4', 'mov', 'webm', 'm4v', 'avi'],
     resourceType: 'auto',
   },
+  banner: {
+    folder: 'banners',
+    // Larger than an avatar: a cover image is rendered wide, so the same
+    // 5MB ceiling would force a visibly soft crop on a normal phone photo.
+    maxBytes: 10 * 1024 * 1024,
+    formats: ['jpg', 'jpeg', 'png', 'webp'],
+    resourceType: 'image',
+  },
   company_logo: {
     folder: 'company-logos',
     maxBytes: 5 * 1024 * 1024,

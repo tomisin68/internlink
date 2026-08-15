@@ -19,10 +19,15 @@ import type {
   Post,
   PostComment,
   PostCommentThread,
+  PostDetail,
   PublicProfile,
+  PushCapabilities,
+  PushTokenInput,
   RecruiterProfile,
   Relationship,
+  SessionPayload,
   Thread,
+  UpdateAccountImagesInput,
   UpdateInternProfileInput,
   WorkMode,
 } from '@internlink/shared-types';
@@ -118,6 +123,27 @@ export const profileApiClient = {
 
   /** Somebody else's profile, assembled for this viewer. */
   getPublic: (accountId: string) => api.get<PublicProfile>(`/profiles/${accountId}`),
+
+  /**
+   * Profile photo and cover image. Returns the whole session so the header
+   * updates everywhere at once, not just where the change was made.
+   */
+  updateImages: (input: UpdateAccountImagesInput) =>
+    api.patch<SessionPayload>('/auth/me/images', input),
+};
+
+/** FR-601 — web push registration. */
+export const pushApi = {
+  status: () => api.get<PushCapabilities>('/notifications/push/status'),
+
+  register: (input: PushTokenInput) =>
+    api.post<{ registered: boolean }>('/notifications/push/tokens', input),
+
+  unregister: (token: string) =>
+    api.delete<{ registered: boolean }>('/notifications/push/tokens', { body: { token } }),
+
+  /** Fires a push to your own devices, so setup is verifiable end to end. */
+  test: () => api.post<{ sent: number; pruned: number }>('/notifications/push/test'),
 };
 
 export type { Account };
@@ -130,6 +156,9 @@ export const feedApi = {
     api.get<{ items: MatchResult[]; profileReady: boolean }>(
       `/feed/matches?limit=${limit}&minScore=${minScore}`,
     ),
+
+  /** A single post — what a shared `/p/:id` link resolves to. */
+  getPost: (id: string) => api.get<PostDetail>(`/feed/posts/${id}`),
 
   createPost: (input: CreatePostInput) => api.post<Post>('/feed/posts', input),
 

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Navigate, useNavigate, useParams } from 'react-router-dom';
 import {
@@ -18,6 +19,7 @@ import type { PersonSummary, PublicProfile } from '@internlink/shared-types';
 import { Avatar } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { EmptyState, LoadingScreen } from '@/components/ui/feedback';
+import { ImageLightbox } from '@/components/ui/media-lightbox';
 import { compactCount } from '@/lib/format';
 import { messagingApi, networkApi, profileApiClient, queryKeys } from '@/lib/api-endpoints';
 import { useSession } from '@/features/auth/use-auth';
@@ -36,6 +38,7 @@ export function PublicProfileScreen() {
   const { accountId = '' } = useParams();
   const { account } = useSession();
   const navigate = useNavigate();
+  const [viewing, setViewing] = useState<{ src: string; alt: string } | null>(null);
 
   const { data, isLoading, error } = useQuery({
     queryKey: queryKeys.publicProfile(accountId),
@@ -85,17 +88,38 @@ export function PublicProfileScreen() {
       </button>
 
       <article className="panel overflow-hidden">
-        <div className="h-20 bg-[linear-gradient(115deg,var(--color-violet-600),var(--color-violet-800))]" />
+        <div className="h-28 overflow-hidden sm:h-36">
+          {person.bannerUrl ? (
+            <button
+              type="button"
+              onClick={() => setViewing({ src: person.bannerUrl!, alt: 'Cover image' })}
+              className="block size-full cursor-zoom-in focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--ring)]"
+            >
+              <img src={person.bannerUrl} alt="" className="size-full object-cover" />
+            </button>
+          ) : (
+            <div className="size-full bg-[linear-gradient(115deg,var(--color-violet-600),var(--color-violet-800))]" />
+          )}
+        </div>
 
         <div className="px-5 pb-5">
-          <span className="-mt-9 inline-block rounded-full ring-4 ring-[var(--bg-surface)]">
+          <button
+            type="button"
+            onClick={() =>
+              person.photoUrl &&
+              setViewing({ src: person.photoUrl, alt: `${person.displayName}'s photo` })
+            }
+            disabled={!person.photoUrl}
+            aria-label={person.photoUrl ? 'View profile photo' : undefined}
+            className="-mt-9 inline-block cursor-zoom-in rounded-full ring-4 ring-[var(--bg-surface)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--ring)] disabled:cursor-default"
+          >
             <Avatar
               name={person.displayName}
               src={person.photoUrl}
               size="lg"
               verified={person.isVerified}
             />
-          </span>
+          </button>
 
           <h1 className="mt-3 text-xl font-bold tracking-tight">{person.displayName}</h1>
 
@@ -260,6 +284,10 @@ export function PublicProfileScreen() {
             ))}
           </ul>
         </section>
+      )}
+
+      {viewing && (
+        <ImageLightbox src={viewing.src} alt={viewing.alt} onClose={() => setViewing(null)} />
       )}
     </div>
   );

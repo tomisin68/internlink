@@ -28,9 +28,14 @@ at the point of departure.
 | **Public profiles** (`/u/:accountId`) with connect / follow / message | Done |
 | **Posts, reactions, comments** | API + feed UI |
 | **Photo & video carousels on posts**, muted autoplay in feed | Done |
+| **Fullscreen media viewer** — tap to open, swipe up through the feed | Done |
+| **Video controls** — scrub, ±10s, double-tap seek, mute, fullscreen | Done |
 | **Comment likes and one-level replies** | Done |
 | **Resharing**, with a per-post author switch to turn it off | Done |
-| Notification event emission (FR-601/604) | Emits; no consumer yet |
+| **Share links** (`/p/:id`) with Open Graph previews for photo & video | Done |
+| **Profile photo + cover image** upload, tap either to view full size | Done |
+| **Web push (FR-601)** — new post from someone you follow, re-engagement | Done |
+| Notification event emission (FR-601/604) | Emits + web push |
 | Daily outreach quotas (FR-1102) | Done, Firestore-backed |
 | App shell: bottom nav (mobile) + rail (desktop) | Done |
 | Feed screen, matches screen, inbox, thread view | Done |
@@ -44,7 +49,45 @@ at the point of departure.
 | In-app notifications: bell, unread badge, list, mark-read | Done |
 | Post comments (lazy-loaded per post) | Done |
 | Company pages + follow UI (FR-1008) | API only, no UI |
-| Push/email delivery, ads engine, admin console, Flutter app | Not started |
+| Email delivery (Resend), ads engine, admin console, Flutter app | Not started |
+
+### Web push (FR-601/604)
+
+Two things must be set before the notifications switch appears at all — without
+them the UI hides it rather than offering a toggle that silently fails:
+
+- `FIREBASE_VAPID_KEY` on the API. Firebase console → Project settings → Cloud
+  Messaging → Web Push certificates → **Generate key pair**, then paste the
+  public key. It is public by design; the private half never leaves Firebase,
+  because the Admin SDK signs sends with the service account.
+- `CRON_SECRET` on both the API and the `internlink-reengagement` cron job in
+  `render.yaml`. Render does not share a generated value across services, so set
+  the same string by hand on both. Unset, the job endpoint refuses every call.
+
+Push handling lives in `apps/web/public/push-sw.js`, imported into the Workbox
+service worker rather than shipped as a separate `firebase-messaging-sw.js`. A
+browser allows one worker per scope; two registrations would mean whichever
+landed last silently broke the other.
+
+Notifications fire when someone you follow posts, and — via the daily cron — for
+accounts quiet for seven days. The re-engagement sweep only touches accounts
+that finished onboarding, and never nudges the same person twice inside a
+fortnight. A re-engagement push is the fastest way to get notifications switched
+off for good, so it is deliberately hard to trigger.
+
+### Share links
+
+`/p/:id` is the post permalink. On Vercel it is rewritten to the API's share
+endpoint, which serves real HTML with Open Graph and Twitter tags — WhatsApp,
+Slack and Twitter fetch a URL and read its `<head>` without running JavaScript,
+so an SPA that sets meta tags after mount unfurls as a blank card. A video's
+poster frame becomes `og:image` and the file itself `og:video`.
+
+Human visitors are bounced into the app on whichever host they arrived from,
+resolved from `x-forwarded-host` and checked against the CORS allowlist — an
+unrecognised host falls back to `WEB_APP_ORIGIN` rather than becoming an open
+redirect. On Firebase Hosting, which cannot proxy to Render, `/p/:id` renders
+the SPA route directly: the link works, it just does not unfurl.
 
 ### Media uploads: two modes
 
@@ -65,10 +108,10 @@ issues a short-lived signature scoped to a per-account folder. It needs
 set, `GET /v1/health` reports `cloudinary: skipped` and the document uploaders
 render an explanation rather than a control that always errors.
 
-**81 tests pass** (`npm test -w @internlink/api`). They cover the ranking,
-matching, moderation and comment-threading logic — everything there is pure,
-with an injected clock and no Firestore. Route and service layers have no tests
-yet.
+**88 tests pass** (`npm test -w @internlink/api`). They cover the ranking,
+matching, moderation, comment-threading and share-origin logic — everything
+there is pure, with an injected clock and no Firestore. Route and service layers
+have no tests yet.
 
 ---
 

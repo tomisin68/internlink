@@ -3,16 +3,18 @@ import {
   SelectRoleSchema,
   SessionExchangeSchema,
   SwitchRoleSchema,
+  UpdateAccountImagesSchema,
   type SelectRoleInput,
   type SessionExchangeInput,
   type SwitchRoleInput,
+  type UpdateAccountImagesInput,
 } from '@internlink/shared-types';
 import { asyncHandler } from '../../lib/async-handler.js';
 import { sendOk } from '../../lib/respond.js';
 import { unauthenticated } from '../../lib/errors.js';
 import { requireAuth } from '../../middleware/auth.js';
 import { validate } from '../../middleware/validate.js';
-import { authLimiter } from '../../middleware/rate-limit.js';
+import { authLimiter, writeLimiter } from '../../middleware/rate-limit.js';
 import { firebaseAuth } from '../../config/firebase.js';
 import * as authService from './auth.service.js';
 
@@ -102,6 +104,31 @@ authRouter.post(
   asyncHandler(async (req, res) => {
     if (!req.auth) throw unauthenticated();
     sendOk(res, await authService.completeOnboarding(req.auth.accountId));
+  }),
+);
+
+/**
+ * PATCH /v1/auth/me/images — profile photo and cover image.
+ *
+ * Separate from the profile wizards: changing your photo is a one-tap action
+ * people expect from their own profile screen, not something worth re-entering
+ * a four-step wizard for. Returns the whole session so the header updates
+ * everywhere at once instead of only where the change was made.
+ */
+authRouter.patch(
+  '/me/images',
+  requireAuth,
+  writeLimiter,
+  validate(UpdateAccountImagesSchema),
+  asyncHandler(async (req, res) => {
+    if (!req.auth) throw unauthenticated();
+    sendOk(
+      res,
+      await authService.updateAccountImages(
+        req.auth.accountId,
+        req.body as UpdateAccountImagesInput,
+      ),
+    );
   }),
 );
 

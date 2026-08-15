@@ -37,6 +37,12 @@ export const AccountSchema = z.object({
   displayName: z.string().min(1).max(140),
   photoUrl: z.string().url().nullable(),
   /**
+   * Profile cover image. Lives on the account rather than the intern profile so
+   * a recruiter has one too — the profile header is the same component for both
+   * roles, and putting it on one profile type would leave the other with a hole.
+   */
+  bannerUrl: z.string().url().nullable().default(null),
+  /**
    * Which profiles this account actually holds. Drives the role switcher.
    *
    * Empty is a legitimate state, not an error: it is exactly what a

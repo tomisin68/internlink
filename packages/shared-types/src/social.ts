@@ -248,6 +248,21 @@ export const ResharePostSchema = z.object({
 });
 export type ResharePostInput = z.infer<typeof ResharePostSchema>;
 
+/**
+ * A single post, as the share page and the permalink route see it.
+ *
+ * The viewer-relative bits come along so a permalink opened from a shared link
+ * renders a working post card — likes, comments and reshare state included —
+ * rather than a read-only stub that loses every action the feed has.
+ */
+export const PostDetailSchema = z.object({
+  post: PostSchema,
+  hasReacted: z.boolean(),
+  /** Absolute URL, built server-side so the client never guesses its origin. */
+  shareUrl: z.string().url(),
+});
+export type PostDetail = z.infer<typeof PostDetailSchema>;
+
 export const PostCommentSchema = z.object({
   id: IdSchema,
   postId: IdSchema,
@@ -304,6 +319,7 @@ export const PersonSummarySchema = z.object({
   id: IdSchema,
   displayName: z.string().max(140),
   photoUrl: z.string().url().nullable(),
+  bannerUrl: z.string().url().nullable().default(null),
   headline: z.string().max(160).nullable(),
   activeRole: ActiveRoleSchema,
   isVerified: z.boolean(),

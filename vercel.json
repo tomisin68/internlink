@@ -22,6 +22,21 @@
   "framework": "vite",
   "rewrites": [
     {
+      "//": [
+        "Post permalinks are served by the API, not the SPA.",
+        "",
+        "WhatsApp, Twitter and Slack fetch a shared URL and read its <head>.",
+        "None of them run JavaScript, so an SPA that sets its meta tags after",
+        "mount unfurls as a blank card with the app's generic title. The API",
+        "returns real HTML with the post's own title and media, then bounces a",
+        "human visitor into the app.",
+        "",
+        "Must precede the SPA fallback below — rewrites are matched in order."
+      ],
+      "source": "/p/:postId",
+      "destination": "https://internlink-2g0u.onrender.com/p/:postId"
+    },
+    {
       "//": "SPA fallback, mirroring firebase.json. Static files are matched before rewrites, so this only catches client routes like /feed or /u/:id. The client calls the Render API on its absolute URL (VITE_API_BASE_URL), so nothing is proxied here.",
       "source": "/(.*)",
       "destination": "/index.html"

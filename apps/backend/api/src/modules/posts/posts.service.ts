@@ -21,6 +21,7 @@ import { getCompany, getRecruiterProfile } from '../companies/companies.service.
 import { scanForScamPatterns } from '../moderation/scam-detection.js';
 import { autoFlag } from '../moderation/moderation.service.js';
 import { emit } from '../notifications/events.js';
+import { notifyFollowersOfPost } from '../notifications/fanout.service.js';
 
 /**
  * Builds the denormalised author block stamped onto every post.
@@ -132,6 +133,7 @@ export async function createPost(accountId: string, input: CreatePostInput): Pro
   };
 
   const ref = await db().collection(Collections.posts).add(post);
+  const created: Post = { id: ref.id, ...post };
 
   if (scan.isFlagged && scan.severity) {
     void autoFlag({
@@ -144,7 +146,11 @@ export async function createPost(accountId: string, input: CreatePostInput): Pro
     });
   }
 
-  return { id: ref.id, ...post };
+  // Detached: the author should not wait on their followers' devices, and a
+  // post held back pending review should not announce itself.
+  if (!created.isFlagged) void notifyFollowersOfPost(created);
+
+  return created;
 }
 
 export async function getPost(postId: string): Promise<Post | null> {
@@ -264,6 +270,7 @@ export async function resharePost(
   };
 
   const ref = await db().collection(Collections.posts).add(post);
+  const created: Post = { id: ref.id, ...post };
 
   // Best-effort: the original may have been deleted between the read and here,
   // and a missing counter is not worth failing the reshare over.
@@ -281,7 +288,18 @@ export async function resharePost(
     });
   }
 
-  return { id: ref.id, ...post };
+  if (!created.isFlagged) void notifyFollowersOfPost(created);
+
+  return created;
+}
+
+/** Whether this viewer has reacted to a post — needed by the permalink view. */
+export async function hasReacted(accountId: string, postId: string): Promise<boolean> {
+  const snap = await db()
+    .collection(Collections.postReactions)
+    .doc(`${postId}__${accountId}`)
+    .get();
+  return snap.exists;
 }
 
 /**

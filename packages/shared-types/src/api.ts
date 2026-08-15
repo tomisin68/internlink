@@ -119,6 +119,8 @@ export const UploadKindSchema = z.enum([
   'verification_doc',
   /** Feed carousel content — images and video share one kind and one folder. */
   'post_media',
+  /** Profile cover image. Wider tolerance than an avatar, stills only. */
+  'banner',
 ]);
 export type UploadKind = z.infer<typeof UploadKindSchema>;
 
@@ -138,3 +140,44 @@ export const UploadCapabilitiesSchema = z.object({
   uploadPreset: z.string().nullable(),
 });
 export type UploadCapabilities = z.infer<typeof UploadCapabilitiesSchema>;
+
+/* ------------------------------------------------------------ web push --- */
+
+/**
+ * FR-601 — a device registration for Firebase Cloud Messaging.
+ *
+ * Keyed by the FCM token itself, which is per-browser-profile per-device. One
+ * account legitimately has several: phone, laptop, and the installed PWA are
+ * three separate registrations, and all three should ring.
+ */
+export const PushTokenSchema = z.object({
+  token: z.string().min(1).max(512),
+  platform: z.enum(['web', 'android', 'ios']).default('web'),
+  /** Purely diagnostic — which device stopped receiving and why. */
+  userAgent: z.string().max(400).optional(),
+});
+export type PushTokenInput = z.infer<typeof PushTokenSchema>;
+
+/**
+ * Whether push can work at all here.
+ *
+ * Web push needs a VAPID key pair, and the public half has to reach the client.
+ * Without it the UI must not offer a "turn on notifications" switch that
+ * silently fails — the same rule the uploaders follow.
+ */
+export const PushCapabilitiesSchema = z.object({
+  available: z.boolean(),
+  vapidKey: z.string().nullable(),
+});
+export type PushCapabilities = z.infer<typeof PushCapabilitiesSchema>;
+
+export const NotificationPreferencesSchema = z.object({
+  /** Someone you follow posted. The reason most people enable push at all. */
+  newPostFromFollowing: z.boolean().default(true),
+  messages: z.boolean().default(true),
+  connections: z.boolean().default(true),
+  postActivity: z.boolean().default(true),
+  /** FR-604 — the "you have missed this" nudge after a quiet spell. */
+  reengagement: z.boolean().default(true),
+});
+export type NotificationPreferences = z.infer<typeof NotificationPreferencesSchema>;

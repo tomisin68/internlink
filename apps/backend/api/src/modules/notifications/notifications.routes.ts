@@ -1,17 +1,107 @@
 import { Router } from 'express';
 import { z } from 'zod';
+import {
+  PushTokenSchema,
+  type PushCapabilities,
+  type PushTokenInput,
+} from '@internlink/shared-types';
 import { asyncHandler, param } from '../../lib/async-handler.js';
 import { sendOk } from '../../lib/respond.js';
 import { forbidden, notFound, unauthenticated } from '../../lib/errors.js';
 import { requireAuth } from '../../middleware/auth.js';
 import { validate, validated } from '../../middleware/validate.js';
 import { Collections, db } from '../../config/firebase.js';
+import { env, hasPushCredentials } from '../../config/env.js';
 import { nowIso, serialise } from '../../lib/firestore.js';
+import { logger } from '../../lib/logger.js';
+import * as push from './push.service.js';
+import { runReengagementSweep } from './fanout.service.js';
 import type { NotificationType } from './events.js';
 
 export const notificationsRouter = Router();
 
+/* ======================================================= scheduled jobs === */
+
+/**
+ * The re-engagement sweep, mounted BEFORE `requireAuth`.
+ *
+ * A cron caller has no user session, so it authenticates with a shared secret
+ * instead. If `CRON_SECRET` is unset the route refuses everything rather than
+ * falling open — an unauthenticated "notify every dormant user" endpoint is a
+ * spam cannon aimed at your own install base.
+ */
+const ReengagementBody = z.object({
+  inactiveDays: z.coerce.number().int().min(1).max(365).default(7),
+  limit: z.coerce.number().int().min(1).max(400).default(200),
+});
+
+notificationsRouter.post(
+  '/jobs/reengagement',
+  validate(ReengagementBody),
+  asyncHandler(async (req, res) => {
+    const provided = req.header('x-cron-secret');
+    if (!env.CRON_SECRET || provided !== env.CRON_SECRET) {
+      throw forbidden('This endpoint is not available.');
+    }
+
+    const { inactiveDays, limit } = req.body as z.infer<typeof ReengagementBody>;
+    const result = await runReengagementSweep({ inactiveDays, limit });
+
+    logger.info(result, 'Re-engagement sweep complete');
+    sendOk(res, result);
+  }),
+);
+
 notificationsRouter.use(requireAuth);
+
+/* ============================================================= web push === */
+
+/** Whether push can work here at all — see the uploads/status precedent. */
+notificationsRouter.get(
+  '/push/status',
+  asyncHandler(async (_req, res) => {
+    const payload: PushCapabilities = {
+      available: hasPushCredentials,
+      vapidKey: hasPushCredentials ? env.FIREBASE_VAPID_KEY! : null,
+    };
+    sendOk(res, payload);
+  }),
+);
+
+notificationsRouter.post(
+  '/push/tokens',
+  validate(PushTokenSchema),
+  asyncHandler(async (req, res) => {
+    if (!req.auth) throw unauthenticated();
+    await push.registerToken(req.auth.accountId, req.body as PushTokenInput);
+    sendOk(res, { registered: true });
+  }),
+);
+
+notificationsRouter.delete(
+  '/push/tokens',
+  validate(z.object({ token: z.string().min(1) })),
+  asyncHandler(async (req, res) => {
+    if (!req.auth) throw unauthenticated();
+    await push.unregisterToken((req.body as { token: string }).token);
+    sendOk(res, { registered: false });
+  }),
+);
+
+/** Fires a push to your own devices, so setup can be verified end to end. */
+notificationsRouter.post(
+  '/push/test',
+  asyncHandler(async (req, res) => {
+    if (!req.auth) throw unauthenticated();
+    const result = await push.sendToAccounts([req.auth.accountId], {
+      title: 'Notifications are on',
+      body: 'This is what a notification from InternLink looks like.',
+      path: '/notifications',
+      tag: 'push-test',
+    });
+    sendOk(res, result);
+  }),
+);
 
 export interface NotificationRecord {
   id: string;

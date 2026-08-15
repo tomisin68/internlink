@@ -29,6 +29,8 @@ export type NotificationType =
   | 'post_reshare'
   | 'comment_reaction'
   | 'new_follower'
+  | 'new_post_from_following'
+  | 'reengagement'
   | 'company_verified'
   | 'listing_match';
 

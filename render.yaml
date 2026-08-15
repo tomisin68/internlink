@@ -45,6 +45,11 @@ services:
       - key: FIREBASE_PROJECT_ID
         value: intern-project-38829
 
+      # Where the app lives. Used to build share links and to bounce a share
+      # page visitor into the app, so it must be the canonical public origin.
+      - key: WEB_APP_ORIGIN
+        value: https://intern-project-38829.web.app
+
       # --- secrets: set these in the Render dashboard, never in the repo -----
       - key: FIREBASE_CLIENT_EMAIL
         sync: false
@@ -53,12 +58,26 @@ services:
         # restores the newlines. A key with real line breaks will not parse.
         sync: false
 
+      # Public half of the Web Push VAPID pair (Firebase console → Project
+      # settings → Cloud Messaging → Web Push certificates). Public by design —
+      # it ships to browsers. Without it the notifications switch stays hidden.
+      - key: FIREBASE_VAPID_KEY
+        sync: false
+
+      # Shared secret for the scheduled jobs below. Without it those routes
+      # refuse every call rather than falling open.
+      - key: CRON_SECRET
+        generateValue: true
+
       - key: CLOUDINARY_CLOUD_NAME
         sync: false
       - key: CLOUDINARY_API_KEY
         sync: false
       - key: CLOUDINARY_API_SECRET
         sync: false
+      # Unsigned preset — enables feed photo/video upload without a secret.
+      - key: CLOUDINARY_UPLOAD_PRESET
+        value: internlink
 
       - key: RESEND_API_KEY
         sync: false
@@ -72,3 +91,34 @@ services:
         value: 15
       - key: NEW_ACCOUNT_RESTRICTION_HOURS
         value: 24
+
+  # ---------------------------------------------------------------------------
+  # FR-604 — the "you have missed this" nudge for dormant accounts.
+  #
+  # A cron job rather than anything in-process: the web service is a request
+  # handler and may be running on several instances or asleep on a free plan,
+  # neither of which can be trusted to fire a daily sweep exactly once.
+  #
+  # 09:00 UTC is 10:00 in Lagos — inside waking hours for the launch market
+  # (§2.5), which matters more for a re-engagement push than for anything else
+  # we send. CRON_SECRET must match the web service's; Render does not share a
+  # generated value across services, so set it by hand on both.
+  # ---------------------------------------------------------------------------
+  - type: cron
+    name: internlink-reengagement
+    runtime: node
+    plan: starter
+    region: frankfurt
+    rootDir: .
+    schedule: '0 9 * * *'
+    buildCommand: npm ci
+    startCommand: >-
+      curl -sS -f -X POST "$API_BASE_URL/v1/notifications/jobs/reengagement"
+      -H "content-type: application/json"
+      -H "x-cron-secret: $CRON_SECRET"
+      -d '{"inactiveDays":7,"limit":200}'
+    envVars:
+      - key: API_BASE_URL
+        value: https://internlink-2g0u.onrender.com
+      - key: CRON_SECRET
+        sync: false

@@ -133,6 +133,7 @@ function toPersonSummary(
     id: account.id,
     displayName: account.displayName || `${account.firstName} ${account.lastName}`.trim(),
     photoUrl: account.photoUrl ?? null,
+    bannerUrl: account.bannerUrl ?? null,
     headline: context?.headline ?? null,
     activeRole: account.activeRole,
     isVerified: (account.verificationTiers ?? []).length > 0,

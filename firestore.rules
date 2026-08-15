@@ -190,6 +190,13 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // FCM registrations. Closed in both directions: a token is a capability to
+    // send a push to someone's device, and there is no client-side reason to
+    // read one back — the app already holds its own token from the FCM SDK.
+    match /pushTokens/{tokenId} {
+      allow read, write: if false;
+    }
+
     // ---------------------------------------------------------- moderation ---
     // §9.3 — the queue is staff-only. A reporter learning the status of their
     // own report goes through the API, which returns only what is safe.

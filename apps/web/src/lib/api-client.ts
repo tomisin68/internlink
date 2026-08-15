@@ -122,6 +122,8 @@ export const api = {
     request<T>(path, { ...options, method: 'PATCH', body }),
   put: <T>(path: string, body?: unknown, options?: RequestOptions) =>
     request<T>(path, { ...options, method: 'PUT', body }),
+  // DELETE takes a body here because unregistering a push token identifies it
+  // by value, and an FCM token is far too long to put in a URL path safely.
   delete: <T>(path: string, options?: RequestOptions) =>
     request<T>(path, { ...options, method: 'DELETE' }),
 };

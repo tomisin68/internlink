@@ -14,7 +14,8 @@ import {
 } from '@internlink/shared-types';
 import { asyncHandler, param } from '../../lib/async-handler.js';
 import { sendCreated, sendOk } from '../../lib/respond.js';
-import { unauthenticated } from '../../lib/errors.js';
+import { notFound, unauthenticated } from '../../lib/errors.js';
+import { env } from '../../config/env.js';
 import { requireAuth, requireRole } from '../../middleware/auth.js';
 import { validate, validated } from '../../middleware/validate.js';
 import { writeLimiter } from '../../middleware/rate-limit.js';
@@ -62,6 +63,35 @@ feedRouter.post(
   asyncHandler(async (req, res) => {
     if (!req.auth) throw unauthenticated();
     sendCreated(res, await posts.createPost(req.auth.accountId, req.body as CreatePostInput));
+  }),
+);
+
+/**
+ * GET /v1/feed/posts/:id — a single post, for the permalink route.
+ *
+ * What a shared link resolves to. Returns the viewer-relative state too, so a
+ * post opened from a link renders a fully working card rather than a read-only
+ * stub that has lost every action the feed has.
+ */
+feedRouter.get(
+  '/posts/:id',
+  asyncHandler(async (req, res) => {
+    if (!req.auth) throw unauthenticated();
+    const id = param(req, 'id');
+
+    const post = await posts.getPost(id);
+    if (!post) throw notFound('That post');
+    // A flagged post is visible to its author and nobody else — same rule the
+    // feed ranker applies, restated here because this route bypasses the feed.
+    if (post.isFlagged && post.authorAccountId !== req.auth.accountId) {
+      throw notFound('That post');
+    }
+
+    sendOk(res, {
+      post,
+      hasReacted: await posts.hasReacted(req.auth.accountId, id),
+      shareUrl: `${env.WEB_APP_ORIGIN}/p/${id}`,
+    });
   }),
 );
 

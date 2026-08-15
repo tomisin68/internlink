@@ -50,6 +50,28 @@ const EnvSchema = z
     RESEND_API_KEY: z.string().optional(),
     RESEND_FROM_EMAIL: z.string().default('InternLink <noreply@internlink.app>'),
 
+    /**
+     * Where the web app lives. Used to build absolute share links and to bounce
+     * a share-page visitor into the app, so it must be the canonical public
+     * origin, not the API's own.
+     */
+    WEB_APP_ORIGIN: z.string().url().default('https://intern-project-38829.web.app'),
+
+    /**
+     * The PUBLIC half of the Web Push VAPID pair (Firebase console → Project
+     * settings → Cloud Messaging → Web Push certificates). Public by design —
+     * it ships to browsers. The private half stays inside Firebase; the Admin
+     * SDK signs with the service account, so there is no private key here.
+     */
+    FIREBASE_VAPID_KEY: z.string().optional(),
+
+    /**
+     * Shared secret for the scheduled-job endpoints. Without it those routes
+     * refuse every call — an unauthenticated "notify everyone" endpoint is a
+     * spam cannon pointed at your own users.
+     */
+    CRON_SECRET: z.string().optional(),
+
     NEW_ACCOUNT_RESTRICTION_HOURS: z.coerce.number().int().min(0).default(24),
     MAX_CONNECTION_REQUESTS_PER_DAY: z.coerce.number().int().positive().default(40),
     MAX_COLD_MESSAGES_PER_DAY: z.coerce.number().int().positive().default(15),
@@ -105,3 +127,6 @@ export const hasCloudinaryUnsigned = Boolean(
 export const hasAnyCloudinary = hasCloudinaryCredentials || hasCloudinaryUnsigned;
 
 export const hasResendCredentials = Boolean(env.RESEND_API_KEY);
+
+/** Web push needs the public VAPID key to reach the browser. */
+export const hasPushCredentials = Boolean(env.FIREBASE_VAPID_KEY);

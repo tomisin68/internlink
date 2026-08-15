@@ -13,32 +13,19 @@ import {
   Sun,
   SunMoon,
 } from 'lucide-react';
-import { Avatar } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Field, Textarea } from '@/components/ui/field';
 import { TagInput } from '@/components/ui/tag-input';
-import { ProgressRing } from '@/components/ui/stepper';
 import { Alert } from '@/components/ui/feedback';
 import { cn } from '@/lib/cn';
 import { profileApiClient, queryKeys } from '@/lib/api-endpoints';
 import { useSession, useSignOut } from '@/features/auth/use-auth';
 import { toast, useThemeStore } from '@/lib/stores';
 import { ApiRequestError } from '@/lib/api-client';
+import { CompletenessCard } from './completeness-card';
+import { ProfileHeaderEditor } from './profile-header-editor';
+import { NotificationSettings } from './notification-settings';
 import { SKILL_SUGGESTIONS } from './constants';
-
-/** How each completeness key from the API reads to a person. */
-const MISSING_COPY: Record<string, string> = {
-  name: 'Add your full name',
-  photo: 'Add a profile photo',
-  headline: 'Write a headline',
-  about: 'Write an About section',
-  location: 'Add your location',
-  skills: 'Add at least three skills',
-  education: 'Add your school',
-  experience: 'Add any experience',
-  cv: 'Upload your CV',
-  portfolio: 'Add a portfolio link',
-};
 
 export function ProfileScreen() {
   const { account, internProfile, company } = useSession();
@@ -57,26 +44,9 @@ export function ProfileScreen() {
   return (
     <div className="mx-auto w-full max-w-2xl px-4 py-6 sm:px-0">
       <article className="panel overflow-hidden">
-        {/* A short brand band rather than a full cover-photo feature — it gives
-            the header shape without inventing an upload nobody asked for. */}
-        <div className="h-20 bg-[linear-gradient(115deg,var(--color-violet-600),var(--color-violet-800))]" />
+        <ProfileHeaderEditor account={account} />
 
         <div className="px-5 pb-5">
-          <div className="-mt-9 flex items-end justify-between gap-3">
-            <span className="rounded-full ring-4 ring-[var(--bg-surface)]">
-              <Avatar
-                name={account.displayName}
-                src={account.photoUrl}
-                size="lg"
-                verified={account.verificationTiers.length > 0}
-              />
-            </span>
-
-            {isIntern && internProfile && (
-              <ProgressRing value={internProfile.completeness} size={48} strokeWidth={4} />
-            )}
-          </div>
-
           <h1 className="mt-3 text-xl font-bold tracking-tight">{account.displayName}</h1>
 
           {isIntern && internProfile?.headline && (
@@ -128,23 +98,16 @@ export function ProfileScreen() {
       </article>
 
       {/* FR-202 — what is missing, ranked by how much it matters. */}
-      {isIntern && completeness && completeness.missing.length > 0 && (
-        <section className="panel mt-4 p-4">
-          <h2 className="text-sm font-semibold text-fg">
-            Finish your profile ({completeness.score}%)
-          </h2>
-          <p className="mt-1 text-sm text-fg-muted">
-            A fuller profile ranks higher in recruiter searches and in your matches.
-          </p>
-          <ul className="mt-3 flex flex-col gap-1.5">
-            {completeness.missing.slice(0, 4).map((key) => (
-              <li key={key} className="flex items-center gap-2 text-sm text-fg-muted">
-                <span aria-hidden="true" className="size-1.5 rounded-full bg-brand" />
-                {MISSING_COPY[key] ?? key}
-              </li>
-            ))}
-          </ul>
-        </section>
+      {isIntern && completeness && (
+        <CompletenessCard
+          score={completeness.score}
+          missing={completeness.missing}
+          // Every remaining item except the photo is edited in the panel below,
+          // and the photo has its own control in the header.
+          onAction={(key) => {
+            if (key !== 'photo') setEditing(true);
+          }}
+        />
       )}
 
       {isIntern && internProfile && editing && <EditPanel />}
@@ -187,6 +150,8 @@ export function ProfileScreen() {
           )}
         </>
       )}
+
+      <NotificationSettings />
 
       <SettingsPanel onSignOut={() => void signOut()} />
     </div>

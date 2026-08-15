@@ -6,6 +6,7 @@ import {
   Bell,
   CalendarClock,
   CheckCheck,
+  Compass,
   Heart,
   MessageCircle,
   MessageSquare,
@@ -109,6 +110,16 @@ const PRESENTATION: Record<
     icon: UserPlus,
     title: 'You have a new follower',
     href: (p) => (p.byAccountId ? `/u/${p.byAccountId as string}` : '/network'),
+  },
+  new_post_from_following: {
+    icon: Compass,
+    title: 'Someone you follow posted',
+    href: (p) => (p.postId ? `/p/${p.postId as string}` : '/feed'),
+  },
+  reengagement: {
+    icon: Sparkles,
+    title: 'You have missed a few things',
+    href: () => '/feed',
   },
   company_verified: {
     icon: BadgeCheck,

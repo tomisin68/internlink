@@ -79,6 +79,9 @@ const PublicProfileScreen = lazy(() =>
     default: m.PublicProfileScreen,
   })),
 );
+const PostScreen = lazy(() =>
+  import('@/features/feed/post-screen').then((m) => ({ default: m.PostScreen })),
+);
 const NotificationsScreen = lazy(() =>
   import('@/features/notifications/notifications-screen').then((m) => ({
     default: m.NotificationsScreen,
@@ -185,6 +188,12 @@ export function AppRoutes() {
           {/* Somebody else's profile. Short prefix because it is the most
               linked-to route in the app — every author name in the feed. */}
           <Route path="/u/:accountId" element={<PublicProfileScreen />} />
+
+          {/* Post permalink — where a shared link lands. Kept short and
+              version-free: people paste these into WhatsApp, so it has to keep
+              working forever. On Vercel the same path is served by the API's
+              share endpoint first, for the Open Graph preview. */}
+          <Route path="/p/:postId" element={<PostScreen />} />
         </Route>
 
         {/* Unbuilt routes referenced by links elsewhere resolve to the root

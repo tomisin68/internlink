@@ -1,6 +1,7 @@
 import { applicationDefault, cert, getApps, initializeApp, type App } from 'firebase-admin/app';
 import { getAuth, type Auth } from 'firebase-admin/auth';
 import { getFirestore, type Firestore } from 'firebase-admin/firestore';
+import { getMessaging, type Messaging } from 'firebase-admin/messaging';
 import { env, hasFirebaseCredentials } from './env.js';
 import { logger } from '../lib/logger.js';
 
@@ -71,6 +72,14 @@ export function firebaseAuth(): Auth {
   return auth;
 }
 
+let messaging: Messaging | null = null;
+
+/** FCM sender. Signs with the service account — no separate push key needed. */
+export function firebaseMessaging(): Messaging {
+  if (!messaging) messaging = getMessaging(ensureApp());
+  return messaging;
+}
+
 /** True on Cloud Functions or Cloud Run, where credentials are ambient. */
 export function isManagedRuntime(): boolean {
   return Boolean(process.env.K_SERVICE || process.env.FUNCTION_TARGET);
@@ -100,6 +109,8 @@ export const Collections = {
   /** Subcollection name under a post document. */
   comments: 'comments',
   notifications: 'notifications',
+  /** FCM registrations, keyed by the token — see PushTokenSchema. */
+  pushTokens: 'pushTokens',
   moderationFlags: 'moderationFlags',
   adUnits: 'adUnits',
   adEvents: 'adEvents',
