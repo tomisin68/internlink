@@ -12,8 +12,20 @@ import { errorHandler, notFoundHandler } from './middleware/error-handler.js';
 import { globalLimiter } from './middleware/rate-limit.js';
 import { apiRouter } from './routes.js';
 
+function allowedCorsOrigins(): Set<string> {
+  const origins = new Set(env.CORS_ORIGINS);
+
+  if (env.FIREBASE_PROJECT_ID) {
+    origins.add(`https://${env.FIREBASE_PROJECT_ID}.web.app`);
+    origins.add(`https://${env.FIREBASE_PROJECT_ID}.firebaseapp.com`);
+  }
+
+  return origins;
+}
+
 export function createApp(): Express {
   const app = express();
+  const corsOrigins = allowedCorsOrigins();
 
   // Behind a load balancer (§5.3) req.ip must come from X-Forwarded-For, or
   // every rate limit keys on the balancer's address and throttles everyone at
@@ -35,7 +47,7 @@ export function createApp(): Express {
       origin(origin, callback) {
         // No Origin header = same-origin, curl, or a mobile app. Allow.
         if (!origin) return callback(null, true);
-        if (env.CORS_ORIGINS.includes(origin)) return callback(null, true);
+        if (corsOrigins.has(origin)) return callback(null, true);
         return callback(new Error(`Origin ${origin} is not allowed`));
       },
       credentials: true,

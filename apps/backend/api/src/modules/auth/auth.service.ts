@@ -165,6 +165,17 @@ export async function exchangeSession(args: {
   const patch: Record<string, unknown> = { lastActiveAt: nowIso() };
   if (account.emailVerified !== args.emailVerified) patch.emailVerified = args.emailVerified;
   if (args.photoUrl && account.photoUrl !== args.photoUrl) patch.photoUrl = args.photoUrl;
+
+  if (args.firstName !== undefined || args.lastName !== undefined) {
+    const firstName = (args.firstName ?? account.firstName).trim();
+    const lastName = (args.lastName ?? account.lastName).trim();
+    const displayName = [firstName, lastName].filter(Boolean).join(' ') || account.displayName;
+
+    if (account.firstName !== firstName) patch.firstName = firstName;
+    if (account.lastName !== lastName) patch.lastName = lastName;
+    if (account.displayName !== displayName) patch.displayName = displayName;
+  }
+
   await accountRef.update(patch);
 
   const merged: Account = { ...account, ...(patch as Partial<Account>) };

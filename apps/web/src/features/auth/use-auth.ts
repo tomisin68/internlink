@@ -1,6 +1,7 @@
 import { useCallback, useEffect } from 'react';
 import {
   createUserWithEmailAndPassword,
+  deleteUser,
   onAuthStateChanged,
   sendEmailVerification,
   sendPasswordResetEmail,
@@ -81,19 +82,29 @@ export function useSignUp() {
       await applyPersistence(true);
       const credential = await createUserWithEmailAndPassword(auth(), input.email, input.password);
 
-      // Set displayName on the Firebase user too, so anything reading the
-      // provider record directly (admin console, exports) sees a real name.
-      const displayName = `${input.firstName} ${input.lastName}`.trim();
-      await updateProfile(credential.user, { displayName });
+      try {
+        // Set displayName on the Firebase user too, so anything reading the
+        // provider record directly (admin console, exports) sees a real name.
+        const displayName = `${input.firstName} ${input.lastName}`.trim();
+        await updateProfile(credential.user, { displayName });
 
-      // Fire-and-forget: a failed verification email must not block sign-up.
-      // Verification is advisory at this stage, not a gate.
-      void sendEmailVerification(credential.user).catch(() => undefined);
+        // Fire-and-forget: a failed verification email must not block sign-up.
+        // Verification is advisory at this stage, not a gate.
+        void sendEmailVerification(credential.user).catch(() => undefined);
 
-      return authApi.exchangeSession({
-        firstName: input.firstName,
-        lastName: input.lastName,
-      });
+        return await authApi.exchangeSession({
+          firstName: input.firstName,
+          lastName: input.lastName,
+        });
+      } catch (error) {
+        // Firebase Auth is created before the API account mirror. If the API is
+        // unreachable, roll that fresh Auth user back so a retry does not hit
+        // "email already in use" for an account the app never finished.
+        await deleteUser(credential.user).catch(async () => {
+          await signOut(auth()).catch(() => undefined);
+        });
+        throw error;
+      }
     },
     onSuccess: setSession,
   });
