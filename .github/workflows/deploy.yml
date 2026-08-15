@@ -22,6 +22,8 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     environment: production
+    env:
+      FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_INTERN_PROJECT_38829 || secrets.FIREBASE_SERVICE_ACCOUNT }}
     steps:
       - uses: actions/checkout@v4
 
@@ -48,6 +50,13 @@ jobs:
           VITE_FIREBASE_APP_ID: ${{ vars.VITE_FIREBASE_APP_ID }}
           VITE_FIREBASE_MEASUREMENT_ID: ${{ vars.VITE_FIREBASE_MEASUREMENT_ID }}
 
+      - name: Check Firebase deploy secret
+        run: |
+          if [ -z "$FIREBASE_SERVICE_ACCOUNT_JSON" ]; then
+            echo "::error title=Missing Firebase service-account secret::Add repository secret FIREBASE_SERVICE_ACCOUNT_INTERN_PROJECT_38829 in GitHub Actions. Paste the full service-account JSON as the value."
+            exit 1
+          fi
+
       - name: Deploy Hosting
         uses: FirebaseExtended/action-hosting-deploy@v0
         with:
@@ -55,19 +64,17 @@ jobs:
           # Generate with: firebase init hosting:github, which creates the
           # project-specific secret name below. FIREBASE_SERVICE_ACCOUNT is kept
           # as a local/manual fallback if you prefer a shorter secret name.
-          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_INTERN_PROJECT_38829 || secrets.FIREBASE_SERVICE_ACCOUNT }}
+          firebaseServiceAccount: ${{ env.FIREBASE_SERVICE_ACCOUNT_JSON }}
           projectId: intern-project-38829
           channelId: live
 
       - name: Deploy Firestore rules and indexes
         if: github.event_name == 'workflow_dispatch' && inputs.deploy_rules
-        env:
-          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_INTERN_PROJECT_38829 || secrets.FIREBASE_SERVICE_ACCOUNT }}
         run: |
           # The CLI authenticates from a key file on disk, so the secret is
           # written out, used, and deleted in the same step — it never survives
           # into a later one.
-          printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/sa.json"
+          printf '%s' "$FIREBASE_SERVICE_ACCOUNT_JSON" > "$RUNNER_TEMP/sa.json"
           export GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/sa.json"
           npm i -g firebase-tools
           firebase deploy \
