@@ -1,0 +1,37 @@
+{
+  "name": "internlink",
+  "version": "0.1.0",
+  "private": true,
+  "description": "InternLink — recruiter & intern talent marketplace. Monorepo.",
+  "engines": {
+    "node": ">=20.11"
+  },
+  "workspaces": [
+    "packages/*",
+    "apps/web",
+    "apps/backend/api"
+  ],
+  "scripts": {
+    "predev": "npm run build:packages",
+    "dev": "concurrently -n api,web -c magenta,cyan \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:web": "npm run dev -w @internlink/web",
+    "dev:api": "npm run dev -w @internlink/api",
+    "build:packages": "npm run build -w @internlink/shared-types && npm run build -w @internlink/design-tokens",
+    "build": "npm run build:packages && npm run build -w @internlink/api && npm run build -w @internlink/web",
+    "build:web": "npm run build -w @internlink/web",
+    "build:api": "npm run build -w @internlink/api",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test -w @internlink/api",
+    "lint": "npm run lint --workspaces --if-present",
+    "deploy:rules": "firebase deploy --only firestore:rules,firestore:indexes",
+    "deploy:hosting": "npm run build:web && firebase deploy --only hosting",
+    "deploy": "npm run deploy:rules && npm run deploy:hosting",
+    "emulators": "firebase emulators:start",
+    "start:api": "npm run start -w @internlink/api",
+    "clean": "node -e \"require('fs').rmSync('node_modules',{recursive:true,force:true})\""
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "typescript": "^5.7.3"
+  }
+}

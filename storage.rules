@@ -1,0 +1,70 @@
+rules_version = '2';
+
+// =============================================================================
+// InternLink Cloud Storage rules
+// -----------------------------------------------------------------------------
+// Note: the product uploads to CLOUDINARY, not Cloud Storage (SRS §7.1) —
+// signed uploads issued by the API, so no client ever holds a credential.
+//
+// These rules exist so the default bucket is not left open. If a future feature
+// does use Storage, it starts from a closed default rather than an accidental
+// "anyone signed in can write anywhere", which is how buckets get filled with
+// other people's files.
+// =============================================================================
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isSelf(accountId) {
+      return signedIn() && request.auth.uid == accountId;
+    }
+
+    function isAdmin() {
+      return signedIn()
+        && 'roles' in request.auth.token
+        && request.auth.token.roles.hasAny(['admin']);
+    }
+
+    // Images: 5MB, image content types only. Checked here as well as in the API
+    // because a rule is the only thing enforcing it on a direct upload.
+    function isAllowedImage() {
+      return request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/(jpeg|png|webp)');
+    }
+
+    // Public-ish media, scoped to the owner's folder so one user can never
+    // overwrite another's avatar.
+    match /avatars/{accountId}/{fileName} {
+      allow read: if signedIn();
+      allow write: if isSelf(accountId) && isAllowedImage();
+    }
+
+    match /company-logos/{companyId}/{fileName} {
+      allow read: if signedIn();
+      // Ownership of a company is not knowable from Storage rules, so writes go
+      // through the API, which does know.
+      allow write: if false;
+    }
+
+    // §2.4 / §5.2 — CVs and verification documents are PII. Readable only by
+    // the owner and by staff; never listable, never public.
+    match /cvs/{accountId}/{fileName} {
+      allow read: if isSelf(accountId) || isAdmin();
+      allow write: if isSelf(accountId) && request.resource.size < 10 * 1024 * 1024;
+    }
+
+    match /verification/{accountId}/{fileName} {
+      allow read: if isSelf(accountId) || isAdmin();
+      allow write: if isSelf(accountId) && request.resource.size < 15 * 1024 * 1024;
+    }
+
+    // Closed by default. Adding a path means adding a rule for it.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

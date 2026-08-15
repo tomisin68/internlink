@@ -1,0 +1,29 @@
+node_modules/
+dist/
+build/
+coverage/
+.turbo/
+.firebase/
+
+# env — never commit credentials
+.env
+.env.*
+!.env.example
+*serviceAccount*.json
+*firebase-adminsdk*.json
+
+# editor / os
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# vite / pwa generated
+apps/web/dev-dist/
+apps/web/public/sw.js
+apps/web/public/workbox-*.js
+
+# logs
+*.log
+npm-debug.log*

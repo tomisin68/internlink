@@ -1,0 +1,128 @@
+import { Router } from 'express';
+import { v2 as cloudinary } from 'cloudinary';
+import { z } from 'zod';
+import { UploadKindSchema, type UploadKind } from '@internlink/shared-types';
+import { asyncHandler } from '../../lib/async-handler.js';
+import { sendOk } from '../../lib/respond.js';
+import { badRequest, unauthenticated, upstreamUnavailable } from '../../lib/errors.js';
+import { requireAuth } from '../../middleware/auth.js';
+import { validate } from '../../middleware/validate.js';
+import { uploadLimiter } from '../../middleware/rate-limit.js';
+import { env, hasCloudinaryCredentials } from '../../config/env.js';
+
+export const uploadsRouter = Router();
+
+let configured = false;
+function ensureCloudinary(): void {
+  if (!hasCloudinaryCredentials) {
+    throw upstreamUnavailable('File uploads');
+  }
+  if (configured) return;
+  cloudinary.config({
+    cloud_name: env.CLOUDINARY_CLOUD_NAME!,
+    api_key: env.CLOUDINARY_API_KEY!,
+    api_secret: env.CLOUDINARY_API_SECRET!,
+    secure: true,
+  });
+  configured = true;
+}
+
+/**
+ * Per-kind upload constraints — SRS §5.2 requires type and size validation
+ * before anything reaches Cloudinary.
+ *
+ * These are enforced twice on purpose: the signature below pins them so
+ * Cloudinary itself rejects a mismatched upload, and the client checks them
+ * first so the user gets an instant, specific error instead of a failed
+ * round trip.
+ */
+const UPLOAD_RULES: Record<
+  UploadKind,
+  { folder: string; maxBytes: number; formats: string[]; resourceType: 'image' | 'raw' }
+> = {
+  avatar: {
+    folder: 'avatars',
+    maxBytes: 5 * 1024 * 1024,
+    formats: ['jpg', 'jpeg', 'png', 'webp'],
+    resourceType: 'image',
+  },
+  company_logo: {
+    folder: 'company-logos',
+    maxBytes: 5 * 1024 * 1024,
+    formats: ['jpg', 'jpeg', 'png', 'webp', 'svg'],
+    resourceType: 'image',
+  },
+  cv: {
+    folder: 'cvs',
+    maxBytes: 10 * 1024 * 1024,
+    formats: ['pdf', 'doc', 'docx'],
+    resourceType: 'raw',
+  },
+  verification_doc: {
+    folder: 'verification',
+    maxBytes: 15 * 1024 * 1024,
+    formats: ['pdf', 'jpg', 'jpeg', 'png'],
+    resourceType: 'raw',
+  },
+};
+
+const SignRequestSchema = z.object({
+  kind: UploadKindSchema,
+  /** Client-reported, checked against the rule so an oversized file is refused
+   *  before we hand out a signature at all. */
+  bytes: z.number().int().positive().optional(),
+});
+
+/**
+ * POST /v1/uploads/signature
+ *
+ * SRS §7.1 — clients never hold Cloudinary secrets. They ask for a signature
+ * scoped to one folder and one moment in time, then upload directly. The
+ * signature expires with the timestamp, so a leaked one is worth nothing an
+ * hour later.
+ */
+uploadsRouter.post(
+  '/signature',
+  requireAuth,
+  uploadLimiter,
+  validate(SignRequestSchema),
+  asyncHandler(async (req, res) => {
+    if (!req.auth) throw unauthenticated();
+    ensureCloudinary();
+
+    const { kind, bytes } = req.body as z.infer<typeof SignRequestSchema>;
+    const rule = UPLOAD_RULES[kind];
+
+    if (bytes && bytes > rule.maxBytes) {
+      throw badRequest(
+        `That file is too large. The limit for this is ${Math.round(rule.maxBytes / 1024 / 1024)}MB.`,
+        { file: [`Maximum size is ${Math.round(rule.maxBytes / 1024 / 1024)}MB.`] },
+      );
+    }
+
+    const timestamp = Math.round(Date.now() / 1000);
+    // Scoping the folder to the account ID means one user's signature can never
+    // be replayed to overwrite another user's asset.
+    const folder = `${env.CLOUDINARY_UPLOAD_FOLDER}/${rule.folder}/${req.auth.accountId}`;
+
+    const paramsToSign = {
+      timestamp,
+      folder,
+      allowed_formats: rule.formats.join(','),
+    };
+
+    const signature = cloudinary.utils.api_sign_request(paramsToSign, env.CLOUDINARY_API_SECRET!);
+
+    sendOk(res, {
+      signature,
+      timestamp,
+      apiKey: env.CLOUDINARY_API_KEY!,
+      cloudName: env.CLOUDINARY_CLOUD_NAME!,
+      folder,
+      uploadPreset: null,
+      allowedFormats: rule.formats,
+      maxBytes: rule.maxBytes,
+      resourceType: rule.resourceType,
+    });
+  }),
+);

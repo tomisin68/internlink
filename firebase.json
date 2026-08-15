@@ -1,0 +1,78 @@
+{
+  "firestore": {
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  },
+  "//storage": [
+    "Intentionally not wired up. Media goes to Cloudinary (SRS §7.1), so Firebase",
+    "Storage has never been provisioned on this project — and including the block",
+    "makes a plain `firebase deploy` fail with 'Storage has not been set up'.",
+    "",
+    "storage.rules is still in the repo: if Storage is ever enabled, it starts",
+    "closed instead of wide open. To activate it, click Get Started in the",
+    "console, then move this key back to \"storage\": { \"rules\": \"storage.rules\" }."
+  ],
+  "//": [
+    "No functions block: the API is a Node service on Render, not a Cloud",
+    "Function. Firebase owns the static app, Firestore rules/indexes and",
+    "Storage rules only.",
+    "",
+    "That makes the browser cross-origin against the API in production, so",
+    "CORS_ORIGINS on Render must list the Hosting domains — see README."
+  ],
+  "hosting": {
+    "public": "apps/web/dist",
+    "predeploy": ["npm --prefix \"$PROJECT_DIR\" run build:web"],
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "rewrites": [
+      {
+        "//": "SPA fallback. The client calls the Render API on its absolute URL (VITE_API_BASE_URL), so nothing is proxied here.",
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ],
+    "headers": [
+      {
+        "//": "Hashed asset filenames are immutable, so cache them hard.",
+        "source": "/assets/**",
+        "headers": [{ "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }]
+      },
+      {
+        "//": "The service worker must never be cached, or users get stuck on an old build forever.",
+        "source": "/sw.js",
+        "headers": [{ "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }]
+      },
+      {
+        "source": "/index.html",
+        "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
+      },
+      {
+        "source": "**",
+        "headers": [
+          { "key": "X-Content-Type-Options", "value": "nosniff" },
+          { "key": "X-Frame-Options", "value": "SAMEORIGIN" },
+          { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
+          {
+            "//": "§5.2 — HTTPS only. Not preloaded until the domain is settled; preload is very hard to undo.",
+            "key": "Strict-Transport-Security",
+            "value": "max-age=31536000; includeSubDomains"
+          },
+          {
+            "key": "Permissions-Policy",
+            "value": "geolocation=(), microphone=(), camera=(), payment=()"
+          }
+        ]
+      }
+    ]
+  },
+  "emulators": {
+    "auth": { "port": 9099 },
+    "firestore": { "port": 8080 },
+    "functions": { "port": 5001 },
+    "hosting": { "port": 5000 },
+    "storage": { "port": 9199 },
+    "//": "4400, not the Firebase default of 4000 — the API dev server owns 4000.",
+    "ui": { "enabled": true, "port": 4400 },
+    "singleProjectMode": true
+  }
+}

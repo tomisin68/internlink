@@ -1,0 +1,258 @@
+@import 'tailwindcss';
+@import '@internlink/design-tokens/tokens.css';
+
+/* ============================================================================
+   Base layer — everything here is a decision, not a reset dump.
+   ============================================================================ */
+
+@layer base {
+  *,
+  ::before,
+  ::after {
+    border-color: var(--border-default);
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    background-color: var(--bg-canvas);
+    color: var(--fg-default);
+    font-family: var(--font-sans);
+    font-size: var(--text-base);
+    line-height: 1.5;
+    /* `optimizeLegibility` triggers costly shaping on long pages; `auto` is the
+       right call for a text-heavy product. */
+    text-rendering: auto;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    /* dvh, not vh — mobile browser chrome collapsing must not clip the layout. */
+    min-height: 100dvh;
+    /* Stops the whole page rubber-banding on iOS while inner panes still scroll. */
+    overscroll-behavior-y: none;
+  }
+
+  h1, h2, h3, h4 {
+    font-family: var(--font-display);
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    color: var(--fg-default);
+    text-wrap: balance;
+  }
+
+  p {
+    text-wrap: pretty;
+  }
+
+  /* One focus treatment for the whole app. `:focus-visible` means pointer users
+     never see it and keyboard users always do. */
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+    border-radius: var(--radius-xs);
+  }
+  :focus:not(:focus-visible) {
+    outline: none;
+  }
+
+  ::selection {
+    background-color: var(--brand);
+    color: #fff;
+  }
+
+  /* Native controls should follow the theme rather than render a white
+     scrollbar strip on a dark page. */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: var(--radius-full);
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--fg-faint);
+    background-clip: content-box;
+  }
+
+  input,
+  textarea,
+  select,
+  button {
+    font: inherit;
+    color: inherit;
+  }
+
+  /* Chrome paints its own pale-yellow autofill background, which destroys the
+     dark theme. Repaint it via an inset shadow — `background-color` is ignored
+     for autofilled inputs. */
+  input:-webkit-autofill,
+  input:-webkit-autofill:hover,
+  input:-webkit-autofill:focus {
+    -webkit-box-shadow: 0 0 0 1000px var(--bg-surface) inset;
+    -webkit-text-fill-color: var(--fg-default);
+    caret-color: var(--fg-default);
+    transition: background-color 9999s ease-in-out 0s;
+  }
+
+  [hidden] {
+    display: none !important;
+  }
+}
+
+/* ============================================================================
+   Motion — honoured globally, not per-component.
+   ============================================================================ */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ============================================================================
+   Utilities
+   ============================================================================ */
+
+@utility safe-top {
+  padding-top: env(safe-area-inset-top);
+}
+@utility safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+@utility safe-x {
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+
+/** Screen-reader-only, but focusable — used by the skip link. */
+@utility sr-only-focusable {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+
+  &:focus-visible {
+    position: fixed;
+    width: auto;
+    height: auto;
+    margin: 0;
+    overflow: visible;
+    clip: auto;
+    white-space: normal;
+  }
+}
+
+/** The ambient aurora wash behind onboarding and auth. */
+@utility aurora-field {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+
+  &::before,
+  &::after {
+    content: '';
+    position: absolute;
+    z-index: -1;
+    border-radius: 9999px;
+    /* A big blur on a big element is the single most expensive thing on these
+       screens. Promoting to its own layer keeps it off the paint path. */
+    will-change: transform;
+    filter: blur(72px);
+    pointer-events: none;
+  }
+
+  &::before {
+    width: 46rem;
+    height: 46rem;
+    top: -18rem;
+    right: -14rem;
+    background: radial-gradient(circle at 30% 30%, var(--aurora-1), transparent 68%);
+  }
+
+  &::after {
+    width: 38rem;
+    height: 38rem;
+    bottom: -16rem;
+    left: -12rem;
+    background: radial-gradient(circle at 60% 40%, var(--aurora-3), transparent 66%);
+  }
+}
+
+/** Card surface used across auth, wizard steps and dashboards. */
+@utility panel {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-sm);
+}
+
+/** Text that carries the brand gradient. Falls back to a solid colour where
+    background-clip:text is unsupported. */
+@utility text-gradient {
+  color: var(--brand);
+
+  @supports (background-clip: text) or (-webkit-background-clip: text) {
+    background-image: linear-gradient(
+      110deg,
+      var(--brand) 0%,
+      var(--accent) 55%,
+      var(--brand) 100%
+    );
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+}
+
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+/** Skeleton loader — a moving sheen rather than a pulsing block, because a
+    pulse reads as "broken" and a sweep reads as "loading". */
+@utility skeleton {
+  position: relative;
+  overflow: hidden;
+  background-color: var(--bg-surface-sunken);
+  border-radius: var(--radius-sm);
+
+  &::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background-image: linear-gradient(
+      90deg,
+      transparent,
+      color-mix(in srgb, var(--fg-faint) 18%, transparent),
+      transparent
+    );
+    animation: shimmer 1.6s infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    &::after {
+      animation: none;
+    }
+  }
+}

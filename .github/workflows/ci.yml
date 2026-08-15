@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A second push to the same branch cancels the first — no point burning minutes
+# verifying a commit that has already been superseded.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      # shared-types and design-tokens must be compiled first: both apps import
+      # them from build output, so a typecheck before this fails to resolve them.
+      - name: Build shared packages
+        run: npm run build:packages
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      # Building the web app is the real check that nothing broke — typecheck
+      # alone will not catch a bad Tailwind directive or a missing asset.
+      - name: Build
+        run: npm run build
+        env:
+          # Placeholders: the build only needs these to exist. Real values are
+          # injected in the deploy workflow.
+          VITE_FIREBASE_API_KEY: ci-placeholder
+          VITE_FIREBASE_PROJECT_ID: ci-placeholder
