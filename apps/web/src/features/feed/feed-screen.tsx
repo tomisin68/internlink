@@ -20,6 +20,7 @@ import { feedApi, queryKeys } from '@/lib/api-endpoints';
 import { useSession } from '@/features/auth/use-auth';
 import { toast } from '@/lib/stores';
 import { ApiRequestError } from '@/lib/api-client';
+import { Comments } from './comments';
 
 /**
  * The "why am I seeing this" label.
@@ -203,6 +204,7 @@ function PostCard({
   scope: 'for_you' | 'following';
 }) {
   const queryClient = useQueryClient();
+  const [showComments, setShowComments] = useState(false);
   const reason = REASON_LABEL[item.reason];
   const ReasonIcon = reason.icon;
 
@@ -325,11 +327,21 @@ function PostCard({
 
           <button
             type="button"
-            className="flex h-9 cursor-pointer items-center gap-1.5 rounded-lg px-3 text-sm font-medium text-fg-muted transition-colors hover:bg-surface-sunken hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--ring)]"
+            onClick={() => setShowComments((v) => !v)}
+            aria-expanded={showComments}
+            className={cn(
+              'flex h-9 cursor-pointer items-center gap-1.5 rounded-lg px-3 text-sm font-medium transition-colors duration-[160ms]',
+              'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--ring)]',
+              showComments
+                ? 'bg-surface-sunken text-fg'
+                : 'text-fg-muted hover:bg-surface-sunken hover:text-fg',
+            )}
           >
             <MessageCircle aria-hidden="true" className="size-4" />
             {item.post.commentCount > 0 && compactCount(item.post.commentCount)}
-            <span className="sr-only">Comment</span>
+            <span className="sr-only">
+              {showComments ? 'Hide comments' : 'Show comments'}
+            </span>
           </button>
 
           {item.post.authorAccountId === viewerId && (
@@ -337,6 +349,8 @@ function PostCard({
           )}
         </footer>
       </article>
+
+      {showComments && <Comments postId={item.post.id} scope={scope} />}
     </motion.li>
   );
 }

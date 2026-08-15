@@ -74,6 +74,11 @@ const NetworkScreen = lazy(() =>
 const ProfileScreen = lazy(() =>
   import('@/features/profile/profile-screen').then((m) => ({ default: m.ProfileScreen })),
 );
+const NotificationsScreen = lazy(() =>
+  import('@/features/notifications/notifications-screen').then((m) => ({
+    default: m.NotificationsScreen,
+  })),
+);
 
 export function AppRoutes() {
   return (
@@ -170,6 +175,7 @@ export function AppRoutes() {
 
           <Route path="/applications" element={<ApplicationsScreen />} />
           <Route path="/network" element={<NetworkScreen />} />
+          <Route path="/notifications" element={<NotificationsScreen />} />
           <Route path="/profile" element={<ProfileScreen />} />
         </Route>
 

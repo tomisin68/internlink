@@ -12,6 +12,7 @@ import { uploadsRouter } from './modules/uploads/uploads.routes.js';
 import { messagingRouter } from './modules/messaging/messaging.routes.js';
 import { networkRouter } from './modules/connections/connections.routes.js';
 import { feedRouter } from './modules/feed/feed.routes.js';
+import { notificationsRouter } from './modules/notifications/notifications.routes.js';
 
 const startedAt = Date.now();
 
@@ -62,3 +63,4 @@ apiRouter.use('/uploads', uploadsRouter);
 apiRouter.use('/messages', messagingRouter);
 apiRouter.use('/network', networkRouter);
 apiRouter.use('/feed', feedRouter);
+apiRouter.use('/notifications', notificationsRouter);

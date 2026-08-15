@@ -48,6 +48,9 @@ export interface UploadTicket {
 export const uploadApi = {
   sign: (kind: 'avatar' | 'company_logo' | 'cv' | 'verification_doc', bytes?: number) =>
     api.post<UploadTicket>('/uploads/signature', { kind, bytes }),
+
+  /** Whether the media backend is configured at all — see uploads.routes.ts. */
+  status: () => api.get<{ available: boolean }>('/uploads/status'),
 };
 
 /**

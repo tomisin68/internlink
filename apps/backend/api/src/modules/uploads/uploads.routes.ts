@@ -12,6 +12,24 @@ import { env, hasCloudinaryCredentials } from '../../config/env.js';
 
 export const uploadsRouter = Router();
 
+/**
+ * GET /v1/uploads/status
+ *
+ * Lets the client find out whether uploads work *before* offering one.
+ *
+ * Without this, an unconfigured Cloudinary shows up as a 503 only after the
+ * user has picked a file — which reads as "your file was rejected" rather than
+ * "this feature is off". Offering a control that cannot succeed is worse than
+ * not offering it, so the UI hides the uploader instead.
+ */
+uploadsRouter.get(
+  '/status',
+  requireAuth,
+  asyncHandler(async (_req, res) => {
+    sendOk(res, { available: hasCloudinaryCredentials });
+  }),
+);
+
 let configured = false;
 function ensureCloudinary(): void {
   if (!hasCloudinaryCredentials) {

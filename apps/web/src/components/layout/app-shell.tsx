@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
+  Bell,
   Briefcase,
   Compass,
   Home,
@@ -10,6 +11,10 @@ import {
   Sparkles,
   Users,
 } from 'lucide-react';
+import {
+  notificationKeys,
+  notificationsApi,
+} from '@/features/notifications/notifications-screen';
 import { Logo } from '@/components/ui/logo';
 import { Avatar } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -71,8 +76,16 @@ export function AppShell({ children }: { children?: ReactNode }) {
     enabled: Boolean(account),
   });
 
+  const { data: notifications } = useQuery({
+    queryKey: notificationKeys.unread,
+    queryFn: notificationsApi.unreadCount,
+    refetchInterval: 60_000,
+    enabled: Boolean(account),
+  });
+
   const isIntern = account?.activeRole === 'intern';
   const unread = (summary?.unreadThreads ?? 0) + (summary?.pendingRequests ?? 0);
+  const notificationCount = notifications?.count ?? 0;
   const items = useNavItems(unread, isIntern);
 
   if (!account) return null;
@@ -119,6 +132,25 @@ export function AppShell({ children }: { children?: ReactNode }) {
               </span>
               <span className="md:hidden">{isIntern ? 'Intern' : 'Recruiter'}</span>
             </Button>
+
+            <NavLink
+              to="/notifications"
+              aria-label={
+                notificationCount > 0
+                  ? `Notifications, ${notificationCount} unread`
+                  : 'Notifications'
+              }
+              className={({ isActive }) =>
+                cn(
+                  'relative flex size-9 items-center justify-center rounded-lg transition-colors duration-[160ms]',
+                  'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--ring)]',
+                  isActive ? 'bg-brand-subtle text-brand-fg' : 'text-fg-muted hover:bg-surface-sunken hover:text-fg',
+                )
+              }
+            >
+              <Bell aria-hidden="true" className="size-5" />
+              <Badge count={notificationCount} />
+            </NavLink>
 
             <NavLink
               to="/profile"

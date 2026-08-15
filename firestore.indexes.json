@@ -191,6 +191,19 @@
         { "fieldPath": "deliveryState", "order": "ASCENDING" },
         { "fieldPath": "createdAt", "order": "DESCENDING" }
       ]
+    },
+    {
+      "//": [
+        "notifications.routes.ts — the in-app list and unread badge.",
+        "The three-field index above does NOT serve this query: deliveryState",
+        "sits between accountId and createdAt, so it is not a usable prefix."
+      ],
+      "collectionGroup": "notifications",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "accountId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
     }
   ],
   "fieldOverrides": [

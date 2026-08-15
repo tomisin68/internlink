@@ -3,6 +3,7 @@ import { Camera, FileText, Loader2, Trash2, Upload } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { uploadToCloudinary } from '@/features/auth/auth-api';
 import { toast } from '@/lib/stores';
+import { useUploadsAvailable } from '@/hooks/use-uploads-available';
 
 /* ========================================================= Avatar upload === */
 
@@ -16,6 +17,7 @@ interface AvatarUploadProps {
 
 export function AvatarUpload({ value, onChange, fallback, className }: AvatarUploadProps) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const { available } = useUploadsAvailable();
   const [progress, setProgress] = useState<number | null>(null);
   // A local object URL shows the crop instantly instead of waiting on the
   // round trip — the difference between "responsive" and "laggy" here.
@@ -43,6 +45,25 @@ export function AvatarUpload({ value, onChange, fallback, className }: AvatarUpl
 
   const shown = preview ?? value;
   const isUploading = progress !== null;
+
+  // Media backend not configured — show the placeholder as a plain avatar with
+  // no affordance, rather than a button that always fails.
+  if (!available) {
+    return (
+      <div className={cn('flex items-center gap-4', className)}>
+        <span className="flex size-20 items-center justify-center rounded-full bg-surface-sunken font-[family-name:var(--font-display)] text-xl font-semibold text-fg-subtle">
+          {fallback}
+        </span>
+        <div>
+          <p className="text-sm font-medium text-fg">Profile photo</p>
+          <p className="mt-0.5 text-xs text-fg-subtle">
+            Photo uploads aren&rsquo;t switched on yet. You can add one later — it won&rsquo;t hold
+            up your profile.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={cn('flex items-center gap-4', className)}>
@@ -147,6 +168,7 @@ export function FileUpload({
   className,
 }: FileUploadProps) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const { available } = useUploadsAvailable();
   const [progress, setProgress] = useState<number | null>(null);
   const [isDragging, setIsDragging] = useState(false);
 
@@ -164,6 +186,23 @@ export function FileUpload({
   }
 
   const isUploading = progress !== null;
+
+  if (!available && !value) {
+    return (
+      <div
+        className={cn(
+          'rounded-xl border border-dashed border-border-default bg-surface-sunken px-4 py-5 text-center',
+          className,
+        )}
+      >
+        <p className="text-sm font-medium text-fg-muted">{label} is not available yet</p>
+        <p className="mt-1 text-xs text-fg-subtle">
+          File uploads aren&rsquo;t switched on for this environment. Everything else works — you
+          can add this later.
+        </p>
+      </div>
+    );
+  }
 
   if (value && !isUploading) {
     return (
