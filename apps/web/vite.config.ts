@@ -92,8 +92,25 @@ export default defineConfig(({ mode }) => {
               },
             },
             {
-              // Cloudinary media — immutable per URL, safe to cache hard.
-              urlPattern: /^https:\/\/res\.cloudinary\.com\//,
+              /**
+               * Cloudinary stills — immutable per URL, safe to cache hard.
+               *
+               * Video is excluded, and has to be. A `<video>` fetches with Range
+               * requests, but `caches.match()` ignores the Range header: every
+               * request after the first is answered with the whole cached body,
+               * which for cross-origin media is opaque and cannot be sliced. The
+               * browser reads that as a server with no range support and ends up
+               * with nothing seekable — so the clip streams once, front to back,
+               * and then can never rewind. `loop` stops looping and pressing play
+               * does nothing, because both of those seek back to the start.
+               *
+               * Workbox has RangeRequestsPlugin for this, but it needs a readable
+               * CORS response to slice, and a 100MB clip has no business in a
+               * 200-entry cache regardless. Video goes to the network.
+               */
+              urlPattern: ({ url }) =>
+                url.origin === 'https://res.cloudinary.com' &&
+                !url.pathname.includes('/video/'),
               handler: 'CacheFirst',
               options: {
                 cacheName: 'cloudinary-media',
