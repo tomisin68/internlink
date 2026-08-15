@@ -6,6 +6,7 @@
   "description": "InternLink web app (PWA) — intern + recruiter surface.",
   "scripts": {
     "dev": "vite",
+    "prebuild": "npm run build -w @internlink/shared-types && npm run build -w @internlink/design-tokens",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
