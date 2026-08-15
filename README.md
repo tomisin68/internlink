@@ -35,7 +35,24 @@ at the point of departure.
 | Profile view/edit + theme settings | Done |
 | Realtime messaging via Firestore listeners | Done |
 | Firestore rules + composite indexes (deployed) | Done |
-| Notifications service, ads engine, admin console, Flutter app | Not started |
+| In-app notifications: bell, unread badge, list, mark-read | Done |
+| Post comments (lazy-loaded per post) | Done |
+| Company pages + follow UI (FR-1008) | API only, no UI |
+| Push/email delivery, ads engine, admin console, Flutter app | Not started |
+
+### Known gap: media uploads are off in production
+
+`GET /v1/health` reports `cloudinary: skipped` — the Cloudinary secrets are not
+set on Render, so avatar, CV, logo and verification-document uploads all fail.
+
+The UI handles this honestly rather than pretending: `GET /v1/uploads/status`
+tells the client whether uploads work, and the uploaders render a disabled
+explanation instead of a control that always errors. Offering a button that
+cannot succeed is worse than not offering it.
+
+To switch them on, set `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY` and
+`CLOUDINARY_API_SECRET` in the Render dashboard. No redeploy needed beyond the
+restart Render does automatically. The UI picks it up on the next page load.
 
 **72 tests pass** (`npm test -w @internlink/api`). They cover the ranking and
 moderation logic only — everything there is pure, with an injected clock and no
