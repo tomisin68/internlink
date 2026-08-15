@@ -95,6 +95,22 @@ user out the instant it lands, and that is not something a routine push should
 be able to do. The GitHub workflow only ships rules on a manual
 `workflow_dispatch` with the box ticked.
 
+### GitHub Actions Firebase secret
+
+The deploy workflow needs a Firebase service-account JSON in GitHub Actions.
+Run this locally once:
+
+```bash
+firebase init hosting:github
+```
+
+Choose project `intern-project-38829` and let the Firebase CLI create the
+GitHub secret. The expected secret name is
+`FIREBASE_SERVICE_ACCOUNT_INTERN_PROJECT_38829`. If you create it manually
+instead, add a repository secret with that name under GitHub → Settings →
+Secrets and variables → Actions → Secrets, and paste the full service-account
+JSON.
+
 ### Finishing the API deploy
 
 The API is not live yet — three steps, and the middle one is the easy one to

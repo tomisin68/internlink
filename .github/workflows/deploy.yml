@@ -52,16 +52,17 @@ jobs:
         uses: FirebaseExtended/action-hosting-deploy@v0
         with:
           repoToken: ${{ secrets.GITHUB_TOKEN }}
-          # Generate with: firebase init hosting:github
-          # (or a service account JSON with the Firebase Hosting Admin role)
-          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          # Generate with: firebase init hosting:github, which creates the
+          # project-specific secret name below. FIREBASE_SERVICE_ACCOUNT is kept
+          # as a local/manual fallback if you prefer a shorter secret name.
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_INTERN_PROJECT_38829 || secrets.FIREBASE_SERVICE_ACCOUNT }}
           projectId: intern-project-38829
           channelId: live
 
       - name: Deploy Firestore rules and indexes
         if: github.event_name == 'workflow_dispatch' && inputs.deploy_rules
         env:
-          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_INTERN_PROJECT_38829 || secrets.FIREBASE_SERVICE_ACCOUNT }}
         run: |
           # The CLI authenticates from a key file on disk, so the secret is
           # written out, used, and deleted in the same step — it never survives
