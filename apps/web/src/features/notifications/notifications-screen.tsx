@@ -9,6 +9,7 @@ import {
   Heart,
   MessageCircle,
   MessageSquare,
+  Repeat2,
   Sparkles,
   UserPlus,
 } from 'lucide-react';
@@ -93,6 +94,21 @@ const PRESENTATION: Record<
     icon: MessageCircle,
     title: 'New comment on your post',
     href: () => '/feed',
+  },
+  post_reshare: {
+    icon: Repeat2,
+    title: 'Someone reshared your post',
+    href: () => '/feed',
+  },
+  comment_reaction: {
+    icon: Heart,
+    title: 'Someone liked your comment',
+    href: () => '/feed',
+  },
+  new_follower: {
+    icon: UserPlus,
+    title: 'You have a new follower',
+    href: (p) => (p.byAccountId ? `/u/${p.byAccountId as string}` : '/network'),
   },
   company_verified: {
     icon: BadgeCheck,

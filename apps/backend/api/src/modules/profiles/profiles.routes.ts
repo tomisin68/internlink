@@ -7,7 +7,7 @@ import {
   type CreateRecruiterProfileInput,
   type UpdateInternProfileInput,
 } from '@internlink/shared-types';
-import { asyncHandler } from '../../lib/async-handler.js';
+import { asyncHandler, param } from '../../lib/async-handler.js';
 import { sendCreated, sendOk } from '../../lib/respond.js';
 import { notFound, unauthenticated } from '../../lib/errors.js';
 import { requireAuth } from '../../middleware/auth.js';
@@ -15,6 +15,7 @@ import { validate } from '../../middleware/validate.js';
 import { writeLimiter } from '../../middleware/rate-limit.js';
 import * as profilesService from './profiles.service.js';
 import * as companiesService from '../companies/companies.service.js';
+import * as people from '../connections/people.service.js';
 import { getAccount } from '../auth/auth.service.js';
 
 export const profilesRouter = Router();
@@ -97,5 +98,30 @@ profilesRouter.get(
     if (!profile) throw notFound('Your recruiter profile');
     const company = profile.companyId ? await companiesService.getCompany(profile.companyId) : null;
     sendOk(res, { profile, company });
+  }),
+);
+
+/**
+ * GET /v1/profiles/:accountId — somebody else's profile.
+ *
+ * Declared last: a bare `:accountId` segment matches "intern" and "recruiter"
+ * too, so it must sit below every literal route above it or it swallows them.
+ *
+ * The response is assembled per viewer — relationship, follow state and FR-1105
+ * visibility all depend on who is asking, so this can never be a cached
+ * document read.
+ */
+profilesRouter.get(
+  '/:accountId',
+  asyncHandler(async (req, res) => {
+    if (!req.auth) throw unauthenticated();
+    sendOk(
+      res,
+      await people.getPublicProfile(
+        req.auth.accountId,
+        req.auth.activeRole,
+        param(req, 'accountId'),
+      ),
+    );
   }),
 );

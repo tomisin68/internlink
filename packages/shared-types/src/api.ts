@@ -112,5 +112,29 @@ export const UploadSignatureSchema = z.object({
 });
 export type UploadSignature = z.infer<typeof UploadSignatureSchema>;
 
-export const UploadKindSchema = z.enum(['avatar', 'company_logo', 'cv', 'verification_doc']);
+export const UploadKindSchema = z.enum([
+  'avatar',
+  'company_logo',
+  'cv',
+  'verification_doc',
+  /** Feed carousel content — images and video share one kind and one folder. */
+  'post_media',
+]);
 export type UploadKind = z.infer<typeof UploadKindSchema>;
+
+/**
+ * What the client needs to know before offering an uploader.
+ *
+ * `unsigned` means the account has a public upload preset configured, so the
+ * browser can post straight to Cloudinary without asking us to sign anything.
+ * That is the only mode that works when the API holds no Cloudinary secret,
+ * and it is how feed media uploads stay available in every environment.
+ */
+export const UploadCapabilitiesSchema = z.object({
+  available: z.boolean(),
+  signed: z.boolean(),
+  unsigned: z.boolean(),
+  cloudName: z.string().nullable(),
+  uploadPreset: z.string().nullable(),
+});
+export type UploadCapabilities = z.infer<typeof UploadCapabilitiesSchema>;

@@ -26,6 +26,9 @@ export type NotificationType =
   | 'interview_scheduled'
   | 'post_reaction'
   | 'post_comment'
+  | 'post_reshare'
+  | 'comment_reaction'
+  | 'new_follower'
   | 'company_verified'
   | 'listing_match';
 

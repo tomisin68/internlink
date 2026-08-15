@@ -8,14 +8,18 @@ import type {
   CreateCommentInput,
   CreatePostInput,
   FeedItem,
+  FollowCounts,
   InboxSummary,
   InternProfile,
   Listing,
   MatchResult,
   Message,
   Paginated,
+  PersonSummary,
   Post,
   PostComment,
+  PostCommentThread,
+  PublicProfile,
   RecruiterProfile,
   Relationship,
   Thread,
@@ -35,7 +39,9 @@ export const queryKeys = {
   inboxSummary: ['messages', 'summary'] as const,
   connections: ['network', 'connections'] as const,
   pendingConnections: ['network', 'connections', 'pending'] as const,
+  people: (scope: string, q: string) => ['network', 'people', scope, q] as const,
   relationship: (id: string) => ['network', 'relationship', id] as const,
+  followCounts: (id: string) => ['network', 'follows', id] as const,
   comments: (postId: string) => ['feed', 'posts', postId, 'comments'] as const,
   listings: (filters: string) => ['listings', filters] as const,
   listing: (id: string) => ['listings', id] as const,
@@ -43,6 +49,7 @@ export const queryKeys = {
   myApplications: ['applications', 'mine'] as const,
   pipeline: (listingId: string) => ['applications', 'listing', listingId] as const,
   internProfile: ['profiles', 'intern', 'me'] as const,
+  publicProfile: (accountId: string) => ['profiles', 'public', accountId] as const,
   completeness: ['profiles', 'intern', 'completeness'] as const,
 };
 
@@ -108,6 +115,9 @@ export const profileApiClient = {
 
   getRecruiter: () =>
     api.get<{ profile: RecruiterProfile; company: Company | null }>('/profiles/recruiter/me'),
+
+  /** Somebody else's profile, assembled for this viewer. */
+  getPublic: (accountId: string) => api.get<PublicProfile>(`/profiles/${accountId}`),
 };
 
 export type { Account };
@@ -123,16 +133,30 @@ export const feedApi = {
 
   createPost: (input: CreatePostInput) => api.post<Post>('/feed/posts', input),
 
+  updatePost: (id: string, input: { allowResharing: boolean }) =>
+    api.patch<Post>(`/feed/posts/${id}`, input),
+
   deletePost: (id: string) => api.delete<{ deleted: boolean }>(`/feed/posts/${id}`),
 
   toggleReaction: (id: string) =>
     api.post<{ hasReacted: boolean; reactionCount: number }>(`/feed/posts/${id}/reactions`),
 
+  reshare: (id: string, input: { body?: string; asCompany?: boolean } = {}) =>
+    api.post<Post>(`/feed/posts/${id}/reshares`, input),
+
   listComments: (id: string) =>
-    api.get<{ items: PostComment[] }>(`/feed/posts/${id}/comments`),
+    api.get<{ items: PostCommentThread[] }>(`/feed/posts/${id}/comments`),
 
   addComment: (id: string, input: CreateCommentInput) =>
     api.post<PostComment>(`/feed/posts/${id}/comments`, input),
+
+  toggleCommentReaction: (postId: string, commentId: string) =>
+    api.post<{ hasLiked: boolean; likeCount: number }>(
+      `/feed/posts/${postId}/comments/${commentId}/reactions`,
+    ),
+
+  deleteComment: (postId: string, commentId: string) =>
+    api.delete<{ deleted: boolean }>(`/feed/posts/${postId}/comments/${commentId}`),
 };
 
 export const messagingApi = {
@@ -161,10 +185,23 @@ export const messagingApi = {
     api.post<{ muted: boolean }>(`/messages/threads/${threadId}/mute`, { muted }),
 };
 
-export const networkApi = {
-  connections: () => api.get<{ items: unknown[] }>('/network/connections'),
+/** A pending request, paired with who sent it. */
+export interface PendingRequest {
+  request: ConnectionRecord;
+  person: PersonSummary;
+}
 
-  pending: () => api.get<{ items: ConnectionRecord[] }>('/network/connections/pending'),
+export const networkApi = {
+  connections: () => api.get<{ items: PersonSummary[] }>('/network/connections'),
+
+  pending: () => api.get<{ items: PendingRequest[] }>('/network/connections/pending'),
+
+  /** FR-1006 — people to connect with, ranked by mutual connections. */
+  people: (scope: 'suggested' | 'all' = 'suggested', q = '') => {
+    const params = new URLSearchParams({ scope });
+    if (q) params.set('q', q);
+    return api.get<{ items: PersonSummary[] }>(`/network/people?${params}`);
+  },
 
   connect: (recipientId: string, message?: string) =>
     api.post<ConnectionRecord>('/network/connections', { recipientId, message }),
@@ -172,13 +209,26 @@ export const networkApi = {
   respond: (id: string, accept: boolean) =>
     api.post<ConnectionRecord>(`/network/connections/${id}/respond`, { accept }),
 
+  removeConnection: (accountId: string) =>
+    api.delete<{ removed: boolean }>(`/network/connections/${accountId}`),
+
   relationship: (accountId: string) =>
     api.get<{ relationship: Relationship }>(`/network/relationship/${accountId}`),
 
-  follow: (companyId: string) => api.post<{ following: boolean }>(`/network/follows/${companyId}`),
+  followAccount: (accountId: string) =>
+    api.post<{ following: boolean }>(`/network/follows/accounts/${accountId}`),
+
+  unfollowAccount: (accountId: string) =>
+    api.delete<{ following: boolean }>(`/network/follows/accounts/${accountId}`),
+
+  followCounts: (accountId: string) =>
+    api.get<FollowCounts>(`/network/follows/counts/${accountId}`),
+
+  follow: (companyId: string) =>
+    api.post<{ following: boolean }>(`/network/follows/companies/${companyId}`),
 
   unfollow: (companyId: string) =>
-    api.delete<{ following: boolean }>(`/network/follows/${companyId}`),
+    api.delete<{ following: boolean }>(`/network/follows/companies/${companyId}`),
 
   block: (accountId: string) => api.post<{ blocked: boolean }>(`/network/blocks/${accountId}`),
 

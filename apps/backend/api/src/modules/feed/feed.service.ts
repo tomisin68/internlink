@@ -11,10 +11,7 @@ import { Collections, db } from '../../config/firebase.js';
 import { docToEntity, serialise } from '../../lib/firestore.js';
 import { notFound } from '../../lib/errors.js';
 import { getInternProfile } from '../profiles/profiles.service.js';
-import {
-  buildRelationshipResolver,
-  followedCompanyIds,
-} from '../connections/connections.service.js';
+import { buildRelationshipResolver, followedIds } from '../connections/connections.service.js';
 import { canMatch, scoreListing } from './matching.js';
 import { filterVisible, rankFeed, resolveReason, type RankablePost } from './ranking.js';
 
@@ -50,7 +47,7 @@ export async function getFeed(
       .limit(FEED_CANDIDATE_POOL)
       .get(),
     buildRelationshipResolver(accountId),
-    followedCompanyIds(accountId),
+    followedIds(accountId),
     getInternProfile(accountId).catch(() => null),
     db()
       .collection(Collections.postReactions)
@@ -66,7 +63,8 @@ export async function getFeed(
     const relationship = resolver.relationshipTo(post.authorAccountId);
     const reason = resolveReason({
       relationship,
-      followsCompany: Boolean(post.companyId && followed.has(post.companyId)),
+      followsAccount: followed.accounts.has(post.authorAccountId),
+      followsCompany: Boolean(post.companyId && followed.companies.has(post.companyId)),
       sharesSchool: Boolean(
         profile?.school && post.author.headline?.toLowerCase().includes(profile.school.toLowerCase()),
       ),

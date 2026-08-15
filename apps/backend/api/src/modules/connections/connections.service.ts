@@ -1,4 +1,11 @@
-import type { Account, ConnectionRecord, Relationship } from '@internlink/shared-types';
+import type {
+  Account,
+  ConnectionRecord,
+  Follow,
+  FollowCounts,
+  FollowTarget,
+  Relationship,
+} from '@internlink/shared-types';
 import { Collections, db } from '../../config/firebase.js';
 import { docToEntity, nowIso } from '../../lib/firestore.js';
 import { conflict, forbidden, notFound } from '../../lib/errors.js';
@@ -79,6 +86,29 @@ export async function resolveRelationship(
   return 'none';
 }
 
+/** Requests involving this account that nobody has answered yet, either way. */
+export async function pendingConnections(accountId: string): Promise<ConnectionRecord[]> {
+  const snap = await db()
+    .collection(Collections.connections)
+    .where('participantIds', 'array-contains', accountId)
+    .where('status', '==', 'pending')
+    .get();
+
+  return snap.docs
+    .map((d) => docToEntity<ConnectionRecord>(d))
+    .filter((c): c is ConnectionRecord => Boolean(c));
+}
+
+export interface RelationshipResolver {
+  relationshipTo: (targetId: string) => Relationship;
+  /** The connection document ID when a request is outstanding either way. */
+  connectionIdFor: (targetId: string) => string | null;
+  /** How many of the viewer's connections this person also connects to. */
+  mutualCount: (targetId: string) => number;
+  blockedIds: Set<string>;
+  connections: Set<string>;
+}
+
 /**
  * Builds a resolver that answers relationship questions for many targets after
  * a fixed number of reads.
@@ -87,13 +117,10 @@ export async function resolveRelationship(
  * round trips for a feed page. This does the viewer's own lookups once, then
  * answers from memory.
  */
-export async function buildRelationshipResolver(viewerId: string): Promise<{
-  relationshipTo: (targetId: string) => Relationship;
-  blockedIds: Set<string>;
-  connections: Set<string>;
-}> {
-  const [connections, blocksOut, blocksIn] = await Promise.all([
+export async function buildRelationshipResolver(viewerId: string): Promise<RelationshipResolver> {
+  const [connections, pending, blocksOut, blocksIn] = await Promise.all([
     connectedIds(viewerId),
+    pendingConnections(viewerId),
     db().collection(Collections.blocks).where('blockerId', '==', viewerId).get(),
     db().collection(Collections.blocks).where('blockedId', '==', viewerId).get(),
   ]);
@@ -104,16 +131,26 @@ export async function buildRelationshipResolver(viewerId: string): Promise<{
     ...blocksIn.docs.map((d) => d.data().blockerId as string),
   ]);
 
+  const pendingByTarget = new Map<string, ConnectionRecord>();
+  for (const record of pending) {
+    const other = record.participantIds.find((id) => id !== viewerId);
+    if (other) pendingByTarget.set(other, record);
+  }
+
   // Second-degree needs the connections-of-connections set. Bounded to the
   // first 50 connections: beyond that the set stops discriminating (almost
   // everyone is second-degree) and the read cost stops being worth it.
+  //
+  // Counting how many paths reach each person costs nothing extra on the same
+  // walk, and "3 mutual connections" is what makes a suggestion worth acting on.
   const sampled = connections.slice(0, 50);
-  const secondDegree = new Set<string>();
+  const mutuals = new Map<string, number>();
   if (sampled.length > 0) {
     const results = await Promise.all(sampled.map((id) => connectedIds(id)));
     for (const ids of results) {
       for (const id of ids) {
-        if (id !== viewerId && !connectionSet.has(id)) secondDegree.add(id);
+        if (id === viewerId) continue;
+        mutuals.set(id, (mutuals.get(id) ?? 0) + 1);
       }
     }
   }
@@ -121,11 +158,19 @@ export async function buildRelationshipResolver(viewerId: string): Promise<{
   return {
     connections: connectionSet,
     blockedIds,
+    mutualCount: (targetId: string) => mutuals.get(targetId) ?? 0,
+    connectionIdFor: (targetId: string) => pendingByTarget.get(targetId)?.id ?? null,
     relationshipTo: (targetId: string): Relationship => {
       if (targetId === viewerId) return 'self';
       if (blockedIds.has(targetId)) return 'blocked';
       if (connectionSet.has(targetId)) return 'connected';
-      if (secondDegree.has(targetId)) return 'second_degree';
+
+      const request = pendingByTarget.get(targetId);
+      if (request) {
+        return request.requesterId === viewerId ? 'pending_outgoing' : 'pending_incoming';
+      }
+
+      if (!connectionSet.has(targetId) && (mutuals.get(targetId) ?? 0) > 0) return 'second_degree';
       return 'none';
     },
   };
@@ -243,24 +288,92 @@ export async function listPendingRequests(accountId: string): Promise<Connection
 
 /* ================================================================ follows = */
 
-export async function followCompany(accountId: string, companyId: string): Promise<void> {
-  const id = `${accountId}__${companyId}`;
+/**
+ * Follows cover both companies and people.
+ *
+ * The document ID stays `{followerId}__{targetId}` rather than gaining a type
+ * segment, so every follow written before people were followable keeps its
+ * identity and its idempotency. `targetType` is what disambiguates, and the
+ * reader below backfills it from the legacy `companyId` field.
+ */
+function followDocId(followerId: string, targetId: string): string {
+  return `${followerId}__${targetId}`;
+}
+
+export async function follow(
+  followerId: string,
+  targetType: FollowTarget,
+  targetId: string,
+): Promise<void> {
+  if (targetType === 'account') {
+    if (followerId === targetId) throw conflict('You cannot follow yourself.');
+    const target = await getAccount(targetId);
+    if (!target) throw notFound('That person');
+    // Same reasoning as connection requests: a block is invisible to the person
+    // blocked, so this is deliberately indistinguishable from "no such account".
+    if (await isBlockedEitherWay(followerId, targetId)) throw notFound('That person');
+  }
+
   await db()
     .collection(Collections.follows)
-    .doc(id)
-    .set({ followerId: accountId, companyId, createdAt: nowIso() });
+    .doc(followDocId(followerId, targetId))
+    .set({
+      followerId,
+      targetType,
+      targetId,
+      companyId: targetType === 'company' ? targetId : null,
+      createdAt: nowIso(),
+    });
 }
 
-export async function unfollowCompany(accountId: string, companyId: string): Promise<void> {
-  await db().collection(Collections.follows).doc(`${accountId}__${companyId}`).delete();
+export async function unfollow(followerId: string, targetId: string): Promise<void> {
+  await db().collection(Collections.follows).doc(followDocId(followerId, targetId)).delete();
 }
 
-export async function followedCompanyIds(accountId: string): Promise<Set<string>> {
+/** Both follow sets in one read — the feed needs both on every request. */
+export async function followedIds(accountId: string): Promise<{
+  companies: Set<string>;
+  accounts: Set<string>;
+}> {
   const snap = await db()
     .collection(Collections.follows)
     .where('followerId', '==', accountId)
     .get();
-  return new Set(snap.docs.map((d) => d.data().companyId as string));
+
+  const companies = new Set<string>();
+  const accounts = new Set<string>();
+
+  for (const doc of snap.docs) {
+    const data = doc.data() as Partial<Follow>;
+    // Rows written before follows were generalised carry only `companyId`.
+    const targetId = data.targetId ?? data.companyId;
+    if (!targetId) continue;
+    if ((data.targetType ?? 'company') === 'account') accounts.add(targetId);
+    else companies.add(targetId);
+  }
+
+  return { companies, accounts };
+}
+
+export async function followedCompanyIds(accountId: string): Promise<Set<string>> {
+  return (await followedIds(accountId)).companies;
+}
+
+export async function followerCount(targetId: string): Promise<number> {
+  const snap = await db()
+    .collection(Collections.follows)
+    .where('targetId', '==', targetId)
+    .count()
+    .get();
+  return snap.data().count;
+}
+
+export async function followCounts(accountId: string): Promise<FollowCounts> {
+  const [followers, following] = await Promise.all([
+    followerCount(accountId),
+    db().collection(Collections.follows).where('followerId', '==', accountId).count().get(),
+  ]);
+  return { followers, following: following.data().count };
 }
 
 /* ================================================================= blocks = */

@@ -204,6 +204,19 @@
         { "fieldPath": "accountId", "order": "ASCENDING" },
         { "fieldPath": "createdAt", "order": "DESCENDING" }
       ]
+    },
+    {
+      "//": [
+        "posts.service.ts — likedCommentIds(), which resolves the viewer's own",
+        "like state for a whole comment thread in one read rather than one",
+        "document get per comment."
+      ],
+      "collectionGroup": "commentReactions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "accountId", "order": "ASCENDING" },
+        { "fieldPath": "postId", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": [

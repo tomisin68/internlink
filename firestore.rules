@@ -122,6 +122,8 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Who *you* follow is yours to read. Who follows someone else is not: a
+    // follower list is a contact list, and the API returns only the count.
     match /follows/{followId} {
       allow get, list: if canRead() && resource.data.followerId == uid();
       allow write: if false;
@@ -153,6 +155,13 @@ service cloud.firestore {
     }
 
     match /postReactions/{reactionId} {
+      allow get, list: if canRead() && resource.data.accountId == uid();
+      allow write: if false;
+    }
+
+    // Same shape as postReactions: a viewer may read their own like state, and
+    // the aggregate lives denormalised on the comment itself.
+    match /commentReactions/{reactionId} {
       allow get, list: if canRead() && resource.data.accountId == uid();
       allow write: if false;
     }

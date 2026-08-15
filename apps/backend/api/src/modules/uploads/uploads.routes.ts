@@ -1,14 +1,18 @@
 import { Router } from 'express';
 import { v2 as cloudinary } from 'cloudinary';
 import { z } from 'zod';
-import { UploadKindSchema, type UploadKind } from '@internlink/shared-types';
+import {
+  UploadKindSchema,
+  type UploadCapabilities,
+  type UploadKind,
+} from '@internlink/shared-types';
 import { asyncHandler } from '../../lib/async-handler.js';
 import { sendOk } from '../../lib/respond.js';
 import { badRequest, unauthenticated, upstreamUnavailable } from '../../lib/errors.js';
 import { requireAuth } from '../../middleware/auth.js';
 import { validate } from '../../middleware/validate.js';
 import { uploadLimiter } from '../../middleware/rate-limit.js';
-import { env, hasCloudinaryCredentials } from '../../config/env.js';
+import { env, hasCloudinaryCredentials, hasCloudinaryUnsigned } from '../../config/env.js';
 
 export const uploadsRouter = Router();
 
@@ -21,12 +25,24 @@ export const uploadsRouter = Router();
  * user has picked a file — which reads as "your file was rejected" rather than
  * "this feature is off". Offering a control that cannot succeed is worse than
  * not offering it, so the UI hides the uploader instead.
+ *
+ * The unsigned fields are safe to hand out: a cloud name and an unsigned preset
+ * are public by design — Cloudinary's own widget embeds both in page source.
+ * The preset itself carries the folder and format restrictions, which is what
+ * stops it being a general-purpose upload endpoint for the internet.
  */
 uploadsRouter.get(
   '/status',
   requireAuth,
   asyncHandler(async (_req, res) => {
-    sendOk(res, { available: hasCloudinaryCredentials });
+    const payload: UploadCapabilities = {
+      available: hasCloudinaryCredentials || hasCloudinaryUnsigned,
+      signed: hasCloudinaryCredentials,
+      unsigned: hasCloudinaryUnsigned,
+      cloudName: env.CLOUDINARY_CLOUD_NAME ?? null,
+      uploadPreset: hasCloudinaryUnsigned ? env.CLOUDINARY_UPLOAD_PRESET! : null,
+    };
+    sendOk(res, payload);
   }),
 );
 
@@ -54,15 +70,30 @@ function ensureCloudinary(): void {
  * first so the user gets an instant, specific error instead of a failed
  * round trip.
  */
-const UPLOAD_RULES: Record<
+export const UPLOAD_RULES: Record<
   UploadKind,
-  { folder: string; maxBytes: number; formats: string[]; resourceType: 'image' | 'raw' }
+  { folder: string; maxBytes: number; formats: string[]; resourceType: 'image' | 'raw' | 'auto' }
 > = {
   avatar: {
     folder: 'avatars',
     maxBytes: 5 * 1024 * 1024,
     formats: ['jpg', 'jpeg', 'png', 'webp'],
     resourceType: 'image',
+  },
+  /**
+   * Feed carousel content. `auto` lets one endpoint take both stills and video,
+   * which is what a mixed carousel needs — Cloudinary decides the resource type
+   * from the bytes rather than from a client-declared field we would then have
+   * to trust.
+   *
+   * 100MB covers a phone-shot clip of a minute or so. Larger than that wants
+   * chunked upload, which the plain POST path here does not do.
+   */
+  post_media: {
+    folder: 'posts',
+    maxBytes: 100 * 1024 * 1024,
+    formats: ['jpg', 'jpeg', 'png', 'webp', 'gif', 'heic', 'mp4', 'mov', 'webm', 'm4v', 'avi'],
+    resourceType: 'auto',
   },
   company_logo: {
     folder: 'company-logos',

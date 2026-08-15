@@ -22,8 +22,14 @@ at the point of departure.
 | **Feed ranking (FR-1007)** — affinity × engagement × decay, 19 tests | Done |
 | **Scam auto-flagging (FR-1101)** — 25 tests | Done |
 | **Messaging (FR-501–509)** — threads, requests, mute, block | API + UI |
-| **Connections & follows (FR-1006)**, blocks, reports (FR-702) | API only |
+| **Connections & follows (FR-1006)**, blocks, reports (FR-702) | API + UI |
+| **Following people** (not just companies) | Done |
+| **People directory** — search + suggestions ranked by mutual connections | Done |
+| **Public profiles** (`/u/:accountId`) with connect / follow / message | Done |
 | **Posts, reactions, comments** | API + feed UI |
+| **Photo & video carousels on posts**, muted autoplay in feed | Done |
+| **Comment likes and one-level replies** | Done |
+| **Resharing**, with a per-post author switch to turn it off | Done |
 | Notification event emission (FR-601/604) | Emits; no consumer yet |
 | Daily outreach quotas (FR-1102) | Done, Firestore-backed |
 | App shell: bottom nav (mobile) + rail (desktop) | Done |
@@ -40,23 +46,29 @@ at the point of departure.
 | Company pages + follow UI (FR-1008) | API only, no UI |
 | Push/email delivery, ads engine, admin console, Flutter app | Not started |
 
-### Known gap: media uploads are off in production
+### Media uploads: two modes
 
-`GET /v1/health` reports `cloudinary: skipped` — the Cloudinary secrets are not
-set on Render, so avatar, CV, logo and verification-document uploads all fail.
+Uploads run in whichever of two modes is configured, and the client asks
+`GET /v1/uploads/status` which one before offering a control.
 
-The UI handles this honestly rather than pretending: `GET /v1/uploads/status`
-tells the client whether uploads work, and the uploaders render a disabled
-explanation instead of a control that always errors. Offering a button that
-cannot succeed is worse than not offering it.
+**Unsigned** (cloud `do9hhn8th`, preset `internlink`) is what feed photos and
+video use. An unsigned preset needs no API secret, so it works with the public
+web config alone — which is why post media is available even though the API
+holds no Cloudinary credentials. The preset pins the folder and allowed formats
+in the Cloudinary console; that is what stops it being an open upload endpoint.
+Set `CLOUDINARY_CLOUD_NAME` + `CLOUDINARY_UPLOAD_PRESET` on the API, or rely on
+`VITE_CLOUDINARY_CLOUD_NAME` + `VITE_CLOUDINARY_UPLOAD_PRESET` in the web build.
 
-To switch them on, set `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY` and
-`CLOUDINARY_API_SECRET` in the Render dashboard. No redeploy needed beyond the
-restart Render does automatically. The UI picks it up on the next page load.
+**Signed** (SRS §7.1) is what CVs, logos and verification documents use: the API
+issues a short-lived signature scoped to a per-account folder. It needs
+`CLOUDINARY_API_KEY` and `CLOUDINARY_API_SECRET` on Render — until those are
+set, `GET /v1/health` reports `cloudinary: skipped` and the document uploaders
+render an explanation rather than a control that always errors.
 
-**72 tests pass** (`npm test -w @internlink/api`). They cover the ranking and
-moderation logic only — everything there is pure, with an injected clock and no
-Firestore. Route and service layers have no tests yet.
+**81 tests pass** (`npm test -w @internlink/api`). They cover the ranking,
+matching, moderation and comment-threading logic — everything there is pure,
+with an injected clock and no Firestore. Route and service layers have no tests
+yet.
 
 ---
 

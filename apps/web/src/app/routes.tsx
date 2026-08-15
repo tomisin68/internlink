@@ -74,6 +74,11 @@ const NetworkScreen = lazy(() =>
 const ProfileScreen = lazy(() =>
   import('@/features/profile/profile-screen').then((m) => ({ default: m.ProfileScreen })),
 );
+const PublicProfileScreen = lazy(() =>
+  import('@/features/profile/public-profile-screen').then((m) => ({
+    default: m.PublicProfileScreen,
+  })),
+);
 const NotificationsScreen = lazy(() =>
   import('@/features/notifications/notifications-screen').then((m) => ({
     default: m.NotificationsScreen,
@@ -177,6 +182,9 @@ export function AppRoutes() {
           <Route path="/network" element={<NetworkScreen />} />
           <Route path="/notifications" element={<NotificationsScreen />} />
           <Route path="/profile" element={<ProfileScreen />} />
+          {/* Somebody else's profile. Short prefix because it is the most
+              linked-to route in the app — every author name in the feed. */}
+          <Route path="/u/:accountId" element={<PublicProfileScreen />} />
         </Route>
 
         {/* Unbuilt routes referenced by links elsewhere resolve to the root

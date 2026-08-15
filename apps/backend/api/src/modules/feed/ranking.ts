@@ -26,12 +26,16 @@ const { gravity, affinity, authorDiversityDecay, commentWeight } = RANKING_CONFI
 /** How the viewer relates to a post's author, resolved to a feed reason. */
 export function resolveReason(args: {
   relationship: Relationship;
+  followsAccount: boolean;
   followsCompany: boolean;
   sharesSchool: boolean;
   isOwnPost: boolean;
 }): FeedReason {
   if (args.isOwnPost) return 'your_post';
   if (args.relationship === 'connected') return 'connection';
+  // An explicit follow outranks a company follow: the viewer chose this person
+  // specifically, which is a stronger statement than following their employer.
+  if (args.followsAccount) return 'following_account';
   if (args.followsCompany) return 'following_company';
   if (args.relationship === 'second_degree') return 'second_degree';
   if (args.sharesSchool) return 'same_school';

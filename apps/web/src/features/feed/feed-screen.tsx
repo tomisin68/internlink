@@ -1,19 +1,25 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AnimatePresence, motion } from 'framer-motion';
+import { Link } from 'react-router-dom';
 import {
   Building2,
   Compass,
   Heart,
   MessageCircle,
+  MoreHorizontal,
+  Repeat2,
   Send,
   Sparkles,
+  Trash2,
   Users,
 } from 'lucide-react';
-import type { FeedItem, FeedReason } from '@internlink/shared-types';
+import type { FeedItem, FeedReason, PostAuthor, PostMedia } from '@internlink/shared-types';
 import { Avatar } from '@/components/ui/avatar';
-import { Button } from '@/components/ui/button';
+import { Button, LinkButton } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/feedback';
+import { MediaCarousel } from '@/components/ui/media-carousel';
+import { MediaPicker } from '@/components/ui/media-picker';
 import { cn } from '@/lib/cn';
 import { compactCount, relativeTime } from '@/lib/format';
 import { feedApi, queryKeys } from '@/lib/api-endpoints';
@@ -31,6 +37,7 @@ import { Comments } from './comments';
  */
 const REASON_LABEL: Record<FeedReason, { text: string; icon: typeof Users }> = {
   connection: { text: 'From your network', icon: Users },
+  following_account: { text: 'Someone you follow', icon: Users },
   following_company: { text: 'A company you follow', icon: Building2 },
   second_degree: { text: 'Someone your connections know', icon: Users },
   same_school: { text: 'From your school', icon: Sparkles },
@@ -38,8 +45,10 @@ const REASON_LABEL: Record<FeedReason, { text: string; icon: typeof Users }> = {
   your_post: { text: 'Your post', icon: Sparkles },
 };
 
+type Scope = 'for_you' | 'following';
+
 export function FeedScreen() {
-  const [scope, setScope] = useState<'for_you' | 'following'>('for_you');
+  const [scope, setScope] = useState<Scope>('for_you');
   const { account } = useSession();
 
   const { data, isLoading } = useQuery({
@@ -96,8 +105,13 @@ export function FeedScreen() {
             title={scope === 'following' ? 'Nothing from your network yet' : 'Your feed is empty'}
             description={
               scope === 'following'
-                ? 'Connect with people and follow companies, and their updates will appear here.'
-                : 'Be the first to post something — or connect with a few people to fill this out.'
+                ? 'Follow a few people and companies, and their updates will appear here.'
+                : 'Be the first to post something — or find a few people to follow.'
+            }
+            action={
+              <LinkButton to="/network" size="sm" variant="outline">
+                Find people
+              </LinkButton>
             }
           />
         </div>
@@ -116,15 +130,25 @@ export function FeedScreen() {
 
 function Composer() {
   const [body, setBody] = useState('');
+  const [media, setMedia] = useState<PostMedia[]>([]);
   const [asCompany, setAsCompany] = useState(false);
+  const [allowResharing, setAllowResharing] = useState(true);
   const { account, company } = useSession();
   const queryClient = useQueryClient();
 
   const create = useMutation({
     mutationFn: () =>
-      feedApi.createPost({ kind: 'update', body: body.trim(), tags: [], asCompany }),
+      feedApi.createPost({
+        kind: 'update',
+        body: body.trim(),
+        media,
+        tags: [],
+        asCompany,
+        allowResharing,
+      }),
     onSuccess: () => {
       setBody('');
+      setMedia([]);
       void queryClient.invalidateQueries({ queryKey: ['feed'] });
       toast.success('Posted');
     },
@@ -138,12 +162,14 @@ function Composer() {
 
   if (!account) return null;
   const canPostAsCompany = account.activeRole === 'recruiter' && Boolean(company);
+  // A photo with no caption is a perfectly ordinary post.
+  const canSubmit = Boolean(body.trim()) || media.length > 0;
 
   return (
     <form
       onSubmit={(e) => {
         e.preventDefault();
-        if (body.trim() && !create.isPending) create.mutate();
+        if (canSubmit && !create.isPending) create.mutate();
       }}
       className="panel p-4"
     >
@@ -165,7 +191,9 @@ function Composer() {
         />
       </div>
 
-      <div className="mt-3 flex items-center gap-3 border-t border-border-subtle pt-3">
+      <MediaPicker value={media} onChange={setMedia} disabled={create.isPending} />
+
+      <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-border-subtle pt-3">
         {canPostAsCompany && (
           <label className="flex cursor-pointer items-center gap-2 text-sm text-fg-muted">
             <input
@@ -178,12 +206,24 @@ function Composer() {
           </label>
         )}
 
+        {/* FR-1007 — the author decides whether their post can travel. Set at
+            composition time, and changeable later from the post's own menu. */}
+        <label className="flex cursor-pointer items-center gap-2 text-sm text-fg-muted">
+          <input
+            type="checkbox"
+            checked={allowResharing}
+            onChange={(e) => setAllowResharing(e.target.checked)}
+            className="size-4 cursor-pointer accent-[var(--brand)]"
+          />
+          Allow resharing
+        </label>
+
         <span className="ml-auto text-xs text-fg-faint tabular-nums">{body.length}/3000</span>
 
         <Button
           type="submit"
           size="sm"
-          disabled={!body.trim()}
+          disabled={!canSubmit}
           isLoading={create.isPending}
           rightIcon={<Send />}
         >
@@ -194,6 +234,68 @@ function Composer() {
   );
 }
 
+/**
+ * An author's name and avatar, linking through to their profile.
+ *
+ * Company authors link to the company page, which does not exist yet — so they
+ * render as plain text rather than as a link into a dead end.
+ */
+function AuthorLink({
+  author,
+  timestamp,
+  children,
+}: {
+  author: PostAuthor;
+  timestamp?: string;
+  children?: React.ReactNode;
+}) {
+  const isPerson = author.kind === 'account';
+
+  const identity = (
+    <>
+      <Avatar
+        name={author.name}
+        src={author.avatarUrl}
+        size="md"
+        shape={isPerson ? 'circle' : 'rounded'}
+        verified={author.isVerified}
+      />
+      <span className="min-w-0 flex-1">
+        <span
+          className={cn(
+            'block truncate text-sm font-semibold text-fg',
+            isPerson && 'group-hover:underline',
+          )}
+        >
+          {author.name}
+        </span>
+        {author.headline && (
+          <span className="block truncate text-xs text-fg-subtle">{author.headline}</span>
+        )}
+        {timestamp && (
+          <span className="mt-0.5 block text-2xs text-fg-faint">{relativeTime(timestamp)}</span>
+        )}
+      </span>
+    </>
+  );
+
+  if (!isPerson) {
+    return <span className="flex min-w-0 flex-1 items-start gap-3">{identity}</span>;
+  }
+
+  return (
+    <span className="flex min-w-0 flex-1 items-start gap-3">
+      <Link
+        to={`/u/${author.id}`}
+        className="group flex min-w-0 flex-1 items-start gap-3 rounded-lg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--ring)]"
+      >
+        {identity}
+      </Link>
+      {children}
+    </span>
+  );
+}
+
 function PostCard({
   item,
   viewerId,
@@ -201,17 +303,19 @@ function PostCard({
 }: {
   item: FeedItem;
   viewerId: string;
-  scope: 'for_you' | 'following';
+  scope: Scope;
 }) {
   const queryClient = useQueryClient();
   const [showComments, setShowComments] = useState(false);
   const reason = REASON_LABEL[item.reason];
   const ReasonIcon = reason.icon;
+  const post = item.post;
+  const isMine = post.authorAccountId === viewerId;
 
   // Optimistic: a like that waits on a round trip feels broken. The rollback
   // in onError puts it back if the write actually failed.
   const react = useMutation({
-    mutationFn: () => feedApi.toggleReaction(item.post.id),
+    mutationFn: () => feedApi.toggleReaction(post.id),
     onMutate: async () => {
       const key = queryKeys.feed(scope);
       await queryClient.cancelQueries({ queryKey: key });
@@ -222,7 +326,7 @@ function PostCard({
           ? {
               ...old,
               items: old.items.map((i) =>
-                i.post.id === item.post.id
+                i.post.id === post.id
                   ? {
                       ...i,
                       hasReacted: !i.hasReacted,
@@ -245,6 +349,26 @@ function PostCard({
     },
   });
 
+  const reshare = useMutation({
+    mutationFn: () => feedApi.reshare(post.id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['feed'] });
+      toast.success('Reshared', 'It is now on your profile and in your followers’ feeds.');
+    },
+    onError: (error) => {
+      toast.error(
+        'Could not reshare',
+        error instanceof ApiRequestError ? error.message : 'Try again in a moment.',
+      );
+    },
+  });
+
+  // What the card actually shows: a reshare renders the quoted post's media,
+  // never its own — a reshare has none.
+  const quoted = post.resharedFrom;
+  const media = quoted ? quoted.media : (post.media ?? []);
+  const legacyImage = !quoted && media.length === 0 && post.mediaUrl ? post.mediaUrl : null;
+
   return (
     <motion.li
       layout
@@ -252,47 +376,54 @@ function PostCard({
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, transition: { duration: 0.12 } }}
       transition={{ duration: 0.24, ease: [0.05, 0.7, 0.1, 1] }}
-      className="panel overflow-hidden"
+      // Not `overflow-hidden`: the post menu is absolutely positioned inside
+      // this card, and clipping it would cut the dropdown off on a short post.
+      // The reason bar inherits the card's radius instead, which is the only
+      // thing the clipping was doing.
+      className="panel relative"
     >
-      <p className="flex items-center gap-1.5 border-b border-border-subtle bg-surface-sunken px-4 py-2 text-xs font-medium text-fg-subtle">
+      <p className="flex items-center gap-1.5 rounded-t-[inherit] border-b border-border-subtle bg-surface-sunken px-4 py-2 text-xs font-medium text-fg-subtle">
         <ReasonIcon aria-hidden="true" className="size-3.5" />
         {reason.text}
       </p>
 
       <article className="p-4">
         <header className="flex items-start gap-3">
-          <Avatar
-            name={item.post.author.name}
-            src={item.post.author.avatarUrl}
-            size="md"
-            shape={item.post.author.kind === 'company' ? 'rounded' : 'circle'}
-            verified={item.post.author.isVerified}
-          />
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-semibold text-fg">{item.post.author.name}</p>
-            {item.post.author.headline && (
-              <p className="truncate text-xs text-fg-subtle">{item.post.author.headline}</p>
-            )}
-            <p className="mt-0.5 text-2xs text-fg-faint">{relativeTime(item.post.createdAt)}</p>
-          </div>
+          <AuthorLink author={post.author} timestamp={post.createdAt} />
+          {isMine && <PostMenu post={post} scope={scope} />}
         </header>
 
-        <p className="mt-3 text-sm leading-relaxed whitespace-pre-wrap text-fg text-pretty">
-          {item.post.body}
-        </p>
-
-        {item.post.mediaUrl && (
-          <img
-            src={item.post.mediaUrl}
-            alt=""
-            loading="lazy"
-            className="mt-3 w-full rounded-xl border border-border-subtle object-cover"
-          />
+        {post.body && (
+          <p className="mt-3 text-sm leading-relaxed whitespace-pre-wrap text-fg text-pretty">
+            {post.body}
+          </p>
         )}
 
-        {item.post.tags.length > 0 && (
+        {quoted ? (
+          <QuotedPost
+            author={quoted.author}
+            body={quoted.body}
+            media={quoted.media}
+            createdAt={quoted.createdAt}
+            postId={quoted.postId}
+          />
+        ) : (
+          <>
+            {media.length > 0 && <MediaCarousel media={media} className="mt-3" />}
+            {legacyImage && (
+              <img
+                src={legacyImage}
+                alt=""
+                loading="lazy"
+                className="mt-3 w-full rounded-xl border border-border-subtle object-cover"
+              />
+            )}
+          </>
+        )}
+
+        {post.tags.length > 0 && (
           <ul className="mt-3 flex flex-wrap gap-1.5">
-            {item.post.tags.map((tag) => (
+            {post.tags.map((tag) => (
               <li
                 key={tag}
                 className="rounded-lg bg-brand-subtle px-2 py-0.5 text-xs font-medium text-brand-fg"
@@ -304,53 +435,260 @@ function PostCard({
         )}
 
         <footer className="mt-4 flex items-center gap-1 border-t border-border-subtle pt-3">
-          <button
-            type="button"
+          <ActionButton
+            label={item.hasReacted ? 'Remove reaction' : 'React'}
+            count={post.reactionCount}
+            isActive={item.hasReacted}
+            activeClassName="text-accent-fg hover:bg-accent-subtle"
             onClick={() => react.mutate()}
             aria-pressed={item.hasReacted}
-            className={cn(
-              'flex h-9 cursor-pointer items-center gap-1.5 rounded-lg px-3 text-sm font-medium transition-colors duration-[160ms]',
-              'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--ring)]',
-              item.hasReacted
-                ? 'text-accent-fg hover:bg-accent-subtle'
-                : 'text-fg-muted hover:bg-surface-sunken hover:text-fg',
-            )}
-          >
-            <Heart
-              aria-hidden="true"
-              className="size-4"
-              fill={item.hasReacted ? 'currentColor' : 'none'}
-            />
-            {item.post.reactionCount > 0 && compactCount(item.post.reactionCount)}
-            <span className="sr-only">{item.hasReacted ? 'Remove reaction' : 'React'}</span>
-          </button>
+            icon={<Heart className="size-4" fill={item.hasReacted ? 'currentColor' : 'none'} />}
+          />
 
-          <button
-            type="button"
+          <ActionButton
+            label={showComments ? 'Hide comments' : 'Show comments'}
+            count={post.commentCount}
+            isActive={showComments}
+            activeClassName="bg-surface-sunken text-fg"
             onClick={() => setShowComments((v) => !v)}
             aria-expanded={showComments}
-            className={cn(
-              'flex h-9 cursor-pointer items-center gap-1.5 rounded-lg px-3 text-sm font-medium transition-colors duration-[160ms]',
-              'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--ring)]',
-              showComments
-                ? 'bg-surface-sunken text-fg'
-                : 'text-fg-muted hover:bg-surface-sunken hover:text-fg',
-            )}
-          >
-            <MessageCircle aria-hidden="true" className="size-4" />
-            {item.post.commentCount > 0 && compactCount(item.post.commentCount)}
-            <span className="sr-only">
-              {showComments ? 'Hide comments' : 'Show comments'}
-            </span>
-          </button>
+            icon={<MessageCircle className="size-4" />}
+          />
 
-          {item.post.authorAccountId === viewerId && (
-            <span className="ml-auto text-2xs text-fg-faint">Yours</span>
+          {/* Resharing off is the author's call, so the control disappears
+              rather than sitting there disabled and inviting a click. */}
+          {post.allowResharing !== false && (
+            <ActionButton
+              label="Reshare"
+              count={post.shareCount ?? 0}
+              isActive={false}
+              activeClassName=""
+              disabled={reshare.isPending}
+              onClick={() => reshare.mutate()}
+              icon={<Repeat2 className="size-4" />}
+            />
           )}
+
+          {isMine && <span className="ml-auto text-2xs text-fg-faint">Yours</span>}
         </footer>
       </article>
 
-      {showComments && <Comments postId={item.post.id} scope={scope} />}
+      {showComments && <Comments postId={post.id} scope={scope} viewerId={viewerId} />}
     </motion.li>
+  );
+}
+
+function ActionButton({
+  label,
+  count,
+  icon,
+  isActive,
+  activeClassName,
+  onClick,
+  disabled,
+  ...rest
+}: {
+  label: string;
+  count: number;
+  icon: React.ReactNode;
+  isActive: boolean;
+  activeClassName: string;
+  onClick: () => void;
+  disabled?: boolean;
+} & React.AriaAttributes) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={cn(
+        'flex h-9 cursor-pointer items-center gap-1.5 rounded-lg px-3 text-sm font-medium transition-colors duration-[160ms]',
+        'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--ring)]',
+        'disabled:cursor-not-allowed disabled:opacity-60',
+        isActive ? activeClassName : 'text-fg-muted hover:bg-surface-sunken hover:text-fg',
+      )}
+      {...rest}
+    >
+      <span aria-hidden="true" className="contents">
+        {icon}
+      </span>
+      {count > 0 && compactCount(count)}
+      <span className="sr-only">{label}</span>
+    </button>
+  );
+}
+
+/** The original post, rendered inside a reshare. */
+function QuotedPost({
+  author,
+  body,
+  media,
+  createdAt,
+  postId,
+}: {
+  author: PostAuthor;
+  body: string;
+  media: PostMedia[];
+  createdAt: string;
+  postId: string;
+}) {
+  return (
+    <article className="mt-3 overflow-hidden rounded-xl border border-border-default bg-surface-sunken">
+      <header className="flex items-start gap-2.5 px-3 pt-3">
+        {author.kind === 'account' ? (
+          <Link
+            to={`/u/${author.id}`}
+            className="group flex min-w-0 flex-1 items-center gap-2.5 rounded-lg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--ring)]"
+          >
+            <Avatar name={author.name} src={author.avatarUrl} size="xs" verified={author.isVerified} />
+            <span className="min-w-0">
+              <span className="block truncate text-xs font-semibold text-fg group-hover:underline">
+                {author.name}
+              </span>
+              <span className="block text-2xs text-fg-faint">{relativeTime(createdAt)}</span>
+            </span>
+          </Link>
+        ) : (
+          <span className="flex min-w-0 flex-1 items-center gap-2.5">
+            <Avatar
+              name={author.name}
+              src={author.avatarUrl}
+              size="xs"
+              shape="rounded"
+              verified={author.isVerified}
+            />
+            <span className="min-w-0">
+              <span className="block truncate text-xs font-semibold text-fg">{author.name}</span>
+              <span className="block text-2xs text-fg-faint">{relativeTime(createdAt)}</span>
+            </span>
+          </span>
+        )}
+      </header>
+
+      {body && (
+        <p className="px-3 pt-2 text-sm leading-relaxed whitespace-pre-wrap text-fg-muted text-pretty">
+          {body}
+        </p>
+      )}
+
+      {media.length > 0 && <MediaCarousel media={media} className="mt-2 px-3 pb-3" />}
+      {media.length === 0 && <div className="pb-3" />}
+
+      {/* The original is not routable yet — this keeps the reference visible
+          without linking somewhere that does not resolve. */}
+      <span className="sr-only">Reshared post {postId}</span>
+    </article>
+  );
+}
+
+/** The author's own controls on a post. */
+function PostMenu({ post, scope }: { post: FeedItem['post']; scope: Scope }) {
+  const queryClient = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Click-outside and Escape both close it. A menu you can only dismiss by
+  // picking something from it is a trap on touch.
+  useEffect(() => {
+    if (!open) return;
+
+    function onPointerDown(event: PointerEvent): void {
+      if (!containerRef.current?.contains(event.target as Node)) setOpen(false);
+    }
+    function onKeyDown(event: KeyboardEvent): void {
+      if (event.key === 'Escape') setOpen(false);
+    }
+
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [open]);
+
+  const setResharing = useMutation({
+    mutationFn: (allowResharing: boolean) => feedApi.updatePost(post.id, { allowResharing }),
+    onSuccess: (_result, allowResharing) => {
+      void queryClient.invalidateQueries({ queryKey: ['feed'] });
+      toast.success(allowResharing ? 'Resharing is on' : 'Resharing is off');
+      setOpen(false);
+    },
+    onError: () => toast.error('Could not change that', 'Try again in a moment.'),
+  });
+
+  const remove = useMutation({
+    mutationFn: () => feedApi.deletePost(post.id),
+    onMutate: async () => {
+      const key = queryKeys.feed(scope);
+      await queryClient.cancelQueries({ queryKey: key });
+      const previous = queryClient.getQueryData<{ items: FeedItem[] }>(key);
+      queryClient.setQueryData<{ items: FeedItem[] }>(key, (old) =>
+        old ? { ...old, items: old.items.filter((i) => i.post.id !== post.id) } : old,
+      );
+      return { previous };
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['feed'] });
+      toast.success('Post deleted');
+    },
+    onError: (_error, _vars, context) => {
+      if (context?.previous) queryClient.setQueryData(queryKeys.feed(scope), context.previous);
+      toast.error('Could not delete that post');
+    },
+  });
+
+  const allowResharing = post.allowResharing !== false;
+
+  return (
+    <div ref={containerRef} className="relative shrink-0">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        aria-label="Post options"
+        className="flex size-9 cursor-pointer items-center justify-center rounded-lg text-fg-subtle transition-colors hover:bg-surface-sunken hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--ring)]"
+      >
+        <MoreHorizontal aria-hidden="true" className="size-5" />
+      </button>
+
+      {open && (
+        <div
+          role="menu"
+          className="absolute top-10 right-0 z-30 w-60 overflow-hidden rounded-xl border border-border-default bg-surface p-1 shadow-lg"
+        >
+          <button
+            type="button"
+            role="menuitemcheckbox"
+            aria-checked={allowResharing}
+            disabled={setResharing.isPending}
+            onClick={() => setResharing.mutate(!allowResharing)}
+            className="flex w-full cursor-pointer items-start gap-2.5 rounded-lg px-3 py-2.5 text-left text-sm text-fg transition-colors hover:bg-surface-sunken focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--ring)]"
+          >
+            <Repeat2 aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-fg-subtle" />
+            <span>
+              {allowResharing ? 'Turn off resharing' : 'Turn on resharing'}
+              <span className="mt-0.5 block text-xs text-fg-subtle">
+                {allowResharing
+                  ? 'Others can no longer pass this on.'
+                  : 'Let others pass this on to their feed.'}
+              </span>
+            </span>
+          </button>
+
+          <button
+            type="button"
+            role="menuitem"
+            disabled={remove.isPending}
+            onClick={() => remove.mutate()}
+            className="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-sm text-danger-fg transition-colors hover:bg-danger-subtle focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--ring)]"
+          >
+            <Trash2 aria-hidden="true" className="size-4 shrink-0" />
+            Delete post
+          </button>
+        </div>
+      )}
+    </div>
   );
 }

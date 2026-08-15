@@ -93,6 +93,7 @@ export const Collections = {
   blocks: 'blocks',
   posts: 'posts',
   postReactions: 'postReactions',
+  commentReactions: 'commentReactions',
   messageThreads: 'messageThreads',
   /** Subcollection name under a thread document. */
   messages: 'messages',

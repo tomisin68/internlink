@@ -34,80 +34,10 @@ export const profileApi = {
     api.get<{ score: number; missing: string[] }>('/profiles/intern/me/completeness'),
 };
 
-export interface UploadTicket {
-  signature: string;
-  timestamp: number;
-  apiKey: string;
-  cloudName: string;
-  folder: string;
-  allowedFormats: string[];
-  maxBytes: number;
-  resourceType: 'image' | 'raw';
-}
-
-export const uploadApi = {
-  sign: (kind: 'avatar' | 'company_logo' | 'cv' | 'verification_doc', bytes?: number) =>
-    api.post<UploadTicket>('/uploads/signature', { kind, bytes }),
-
-  /** Whether the media backend is configured at all — see uploads.routes.ts. */
-  status: () => api.get<{ available: boolean }>('/uploads/status'),
-};
-
 /**
- * Uploads straight to Cloudinary using a server-issued signature.
- *
- * The file never touches our API — §7.1's whole point — so a 10MB CV does not
- * occupy a Node process for the duration of a slow mobile upload.
+ * Document uploads live in `lib/cloudinary.ts` alongside the feed-media path,
+ * so both modes (signed and unsigned) are described in one place. Re-exported
+ * here because the profile wizards have always imported them from this module.
  */
-export async function uploadToCloudinary(
-  file: File,
-  kind: 'avatar' | 'company_logo' | 'cv' | 'verification_doc',
-  onProgress?: (percent: number) => void,
-): Promise<{ url: string; publicId: string }> {
-  const ticket = await uploadApi.sign(kind, file.size);
-
-  const extension = file.name.split('.').pop()?.toLowerCase() ?? '';
-  if (!ticket.allowedFormats.includes(extension)) {
-    throw new Error(`That file type is not supported. Use ${ticket.allowedFormats.join(', ')}.`);
-  }
-  if (file.size > ticket.maxBytes) {
-    throw new Error(`That file is too large. Maximum ${Math.round(ticket.maxBytes / 1024 / 1024)}MB.`);
-  }
-
-  const form = new FormData();
-  form.append('file', file);
-  form.append('api_key', ticket.apiKey);
-  form.append('timestamp', String(ticket.timestamp));
-  form.append('signature', ticket.signature);
-  form.append('folder', ticket.folder);
-  form.append('allowed_formats', ticket.allowedFormats.join(','));
-
-  const endpoint = `https://api.cloudinary.com/v1_1/${ticket.cloudName}/${ticket.resourceType}/upload`;
-
-  // XHR rather than fetch: fetch still cannot report upload progress, and a CV
-  // upload on a 3G connection without a progress bar feels broken.
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', endpoint);
-
-    xhr.upload.addEventListener('progress', (event) => {
-      if (event.lengthComputable && onProgress) {
-        onProgress(Math.round((event.loaded / event.total) * 100));
-      }
-    });
-
-    xhr.addEventListener('load', () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        const body = JSON.parse(xhr.responseText) as { secure_url: string; public_id: string };
-        resolve({ url: body.secure_url, publicId: body.public_id });
-      } else {
-        reject(new Error('The upload failed. Try again.'));
-      }
-    });
-
-    xhr.addEventListener('error', () => reject(new Error('The upload failed. Check your connection.')));
-    xhr.addEventListener('abort', () => reject(new Error('Upload cancelled.')));
-
-    xhr.send(form);
-  });
-}
+export { uploadApi, uploadDocument as uploadToCloudinary } from '@/lib/cloudinary';
+export type { UploadTicket } from '@/lib/cloudinary';

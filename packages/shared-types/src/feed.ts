@@ -67,6 +67,7 @@ export type MatchQuery = z.infer<typeof MatchQuerySchema>;
 
 export const FeedReasonSchema = z.enum([
   'connection',
+  'following_account',
   'following_company',
   'second_degree',
   'same_school',
@@ -121,6 +122,9 @@ export const RANKING_CONFIG = {
     affinity: {
       your_post: 0.7,
       connection: 1,
+      // Following is a deliberate choice, like connecting, but one-sided — it
+      // sits just under a mutual connection and just above a company follow.
+      following_account: 0.95,
       following_company: 0.92,
       second_degree: 0.55,
       same_school: 0.5,

@@ -40,6 +40,12 @@ const EnvSchema = z
     CLOUDINARY_API_KEY: z.string().optional(),
     CLOUDINARY_API_SECRET: z.string().optional(),
     CLOUDINARY_UPLOAD_FOLDER: z.string().default('internlink'),
+    /**
+     * An *unsigned* preset. Needs no API secret, so uploads keep working in
+     * environments that hold no Cloudinary credentials at all — which is what
+     * the whole feed-media path depends on.
+     */
+    CLOUDINARY_UPLOAD_PRESET: z.string().optional(),
 
     RESEND_API_KEY: z.string().optional(),
     RESEND_FROM_EMAIL: z.string().default('InternLink <noreply@internlink.app>'),
@@ -90,5 +96,12 @@ export const hasFirebaseCredentials = Boolean(
 export const hasCloudinaryCredentials = Boolean(
   env.CLOUDINARY_CLOUD_NAME && env.CLOUDINARY_API_KEY && env.CLOUDINARY_API_SECRET,
 );
+
+/** Enough to upload from the browser without the API signing anything. */
+export const hasCloudinaryUnsigned = Boolean(
+  env.CLOUDINARY_CLOUD_NAME && env.CLOUDINARY_UPLOAD_PRESET,
+);
+
+export const hasAnyCloudinary = hasCloudinaryCredentials || hasCloudinaryUnsigned;
 
 export const hasResendCredentials = Boolean(env.RESEND_API_KEY);

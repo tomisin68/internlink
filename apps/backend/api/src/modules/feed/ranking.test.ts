@@ -29,11 +29,15 @@ function post(overrides: Partial<Post> = {}): Post {
     kind: 'update',
     body: 'Shipped my first feature.',
     mediaUrl: null,
+    media: [],
     linkUrl: null,
     listingId: null,
     tags: [],
     reactionCount: 0,
     commentCount: 0,
+    shareCount: 0,
+    allowResharing: true,
+    resharedFrom: null,
     isFlagged: false,
     createdAt: '2026-08-15T10:00:00.000Z',
     updatedAt: '2026-08-15T10:00:00.000Z',
@@ -55,6 +59,7 @@ describe('resolveReason', () => {
     expect(
       resolveReason({
         relationship: 'connected',
+        followsAccount: true,
         followsCompany: true,
         sharesSchool: true,
         isOwnPost: true,
@@ -66,6 +71,7 @@ describe('resolveReason', () => {
     expect(
       resolveReason({
         relationship: 'connected',
+        followsAccount: false,
         followsCompany: true,
         sharesSchool: false,
         isOwnPost: false,
@@ -73,10 +79,35 @@ describe('resolveReason', () => {
     ).toBe('connection');
   });
 
+  it('prefers a followed person over their company', () => {
+    expect(
+      resolveReason({
+        relationship: 'none',
+        followsAccount: true,
+        followsCompany: true,
+        sharesSchool: false,
+        isOwnPost: false,
+      }),
+    ).toBe('following_account');
+  });
+
+  it('surfaces a followed person ahead of a second-degree connection', () => {
+    expect(
+      resolveReason({
+        relationship: 'second_degree',
+        followsAccount: true,
+        followsCompany: false,
+        sharesSchool: false,
+        isOwnPost: false,
+      }),
+    ).toBe('following_account');
+  });
+
   it('falls back to popular when there is no relationship at all', () => {
     expect(
       resolveReason({
         relationship: 'none',
+        followsAccount: false,
         followsCompany: false,
         sharesSchool: false,
         isOwnPost: false,
