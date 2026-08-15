@@ -53,11 +53,24 @@ export function VideoPlayer({
   const inViewRef = useRef(false);
   const hideTimer = useRef<number | undefined>(undefined);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [wantsPlayback, setWantsPlayback] = useState(autoPlay);
+  /**
+   * Whether playback is wanted right now — not whether it is happening.
+   *
+   * Reduced motion is consulted once, here, and only for the *automatic* start:
+   * it is a preference about motion nobody asked for. Gating every `play()` call
+   * on it — which is what this used to do — left anyone with animations turned
+   * off holding a video that could not be played at all, not even by pressing
+   * play, since the flag it tested never changed.
+   */
+  const [wantsPlayback, setWantsPlayback] = useState(
+    () => autoPlay && (variant === 'lightbox' || !prefersReducedMotion()),
+  );
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(item.durationSeconds ?? 0);
   const [isScrubbing, setIsScrubbing] = useState(false);
   const [buffered, setBuffered] = useState(0);
+  /** Set when every source in the list failed — otherwise it is a black box. */
+  const [hasError, setHasError] = useState(false);
   /**
    * Whether the control bar is showing.
    *
@@ -97,14 +110,11 @@ export function VideoPlayer({
     const video = videoRef.current;
     if (!video) return;
 
-    // Autoplaying video is exactly the unrequested motion this setting is about.
-    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-
     function sync(): void {
       const el = videoRef.current;
       if (!el) return;
 
-      if (inViewRef.current && isActive && wantsPlayback && !(reduceMotion && autoPlay)) {
+      if (inViewRef.current && isActive && wantsPlayback) {
         // Autoplay can still be refused — data saver, low power mode. Swallow it
         // and leave the poster up; there is a play button either way.
         void el.play().catch(() => undefined);
@@ -127,7 +137,17 @@ export function VideoPlayer({
     sync();
 
     return () => observer.disconnect();
-  }, [isActive, wantsPlayback, autoPlay]);
+  }, [isActive, wantsPlayback]);
+
+  // A new source needs an explicit reload — swapping `<source>` children does
+  // nothing to a media element that has already picked a resource.
+  const loadedUrl = useRef(item.url);
+  useEffect(() => {
+    if (loadedUrl.current === item.url) return;
+    loadedUrl.current = item.url;
+    setHasError(false);
+    videoRef.current?.load();
+  }, [item.url]);
 
   // `muted` is a property, not an attribute — React sets it on first render
   // only, so toggling later has to go through the DOM node.
@@ -137,15 +157,32 @@ export function VideoPlayer({
 
   const isLightbox = variant === 'lightbox';
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
+  const sources = videoSourcesFor(item);
+
+  function handleSourceFailure(): void {
+    setIsPlaying(false);
+    setHasError(true);
+  }
 
   /** Play/pause, and show the controls so the state change is visible. */
   function togglePlayback(): void {
-    setWantsPlayback((v) => {
-      // Pausing keeps the controls up — a paused video with no visible chrome
-      // looks like it failed to load.
-      revealControls(v);
-      return !v;
-    });
+    // Driven by what the video is actually doing, not by the last thing that was
+    // wanted. Those two disagree whenever autoplay was refused — and reading the
+    // stale intent there meant the first press of play *paused* an already
+    // stopped video, so nothing happened until you pressed it twice.
+    const play = !isPlaying;
+    setWantsPlayback(play);
+    // Pausing keeps the controls up — a paused video with no visible chrome
+    // looks like it failed to load.
+    revealControls(!play);
+
+    // Acting on the element here rather than leaving it to the effect keeps the
+    // call inside the click's own task, which is what a browser wants to see
+    // before it lets a video start.
+    const video = videoRef.current;
+    if (!video) return;
+    if (play) void video.play().catch(() => undefined);
+    else video.pause();
   }
 
   // Fullscreen always shows its chrome; a feed card reveals it on hover, focus
@@ -159,14 +196,17 @@ export function VideoPlayer({
     >
       <video
         ref={videoRef}
-        src={item.url}
         poster={item.thumbnailUrl ?? undefined}
         muted
         loop
         playsInline
         preload="metadata"
-        onPlay={() => setIsPlaying(true)}
+        onPlay={() => {
+          setHasError(false);
+          setIsPlaying(true);
+        }}
         onPause={() => setIsPlaying(false)}
+        onError={handleSourceFailure}
         onLoadedMetadata={(e) => {
           const value = e.currentTarget.duration;
           if (Number.isFinite(value)) setDuration(value);
@@ -180,7 +220,20 @@ export function VideoPlayer({
           if (ranges.length > 0) setBuffered(ranges.end(ranges.length - 1));
         }}
         className={cn('size-full bg-black', isLightbox ? 'object-contain' : 'object-cover')}
-      />
+      >
+        {sources.map((source, i) => (
+          <source
+            key={source.src}
+            src={source.src}
+            type={source.type}
+            // A media element with `<source>` children never fires `error` at
+            // itself when the list runs out — the spec fires one at each failed
+            // candidate instead. The last candidate failing is how we find out
+            // that nothing at all could be played.
+            onError={i === sources.length - 1 ? handleSourceFailure : undefined}
+          />
+        ))}
+      </video>
 
       {/* Tap zones: the middle toggles playback, the sides double-tap to seek —
           the gesture people already know from every video app on a phone. */}
@@ -206,7 +259,7 @@ export function VideoPlayer({
       {/* The big centre affordance. `pointer-events-none` so the tap falls
           through to the play/pause zone behind it rather than needing a
           pixel-accurate hit on the circle. */}
-      {!isPlaying && (
+      {!isPlaying && !hasError && (
         <span
           aria-hidden="true"
           className="pointer-events-none absolute inset-0 flex items-center justify-center"
@@ -286,8 +339,62 @@ export function VideoPlayer({
           </div>
         </div>
       </div>
+
+      {/* Every candidate source failed — a codec this browser will not decode,
+          or a file that never finished uploading. Say so: the alternative is a
+          black rectangle that looks like the whole feed is broken. */}
+      {hasError && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 bg-[rgb(15_16_32_/_0.92)] px-4 text-center">
+          <p className="text-sm font-medium text-white">This video could not be played.</p>
+          <a
+            href={item.url}
+            target="_blank"
+            rel="noreferrer"
+            className="text-2xs font-semibold text-white/80 underline underline-offset-2 hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--ring)]"
+          >
+            Open the original
+          </a>
+        </div>
+      )}
     </div>
   );
+}
+
+/** Whether the viewer has asked the system for less movement. */
+function prefersReducedMotion(): boolean {
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+/** Container formats every target browser can decode. */
+const PLAYABLE_FORMATS = new Set(['mp4', 'm4v', 'webm']);
+
+/** A Cloudinary video delivery URL, split at the point transformations go. */
+const CLOUDINARY_VIDEO = /^(https:\/\/res\.cloudinary\.com\/[^/]+\/video\/upload\/)(.+)$/;
+
+/**
+ * The `<source>` candidates for one item, best first.
+ *
+ * A clip shot on a phone arrives as `.mov`, and QuickTime is a container that
+ * Chrome, Firefox and Android all decline — Safari plays it, nothing else does,
+ * which is precisely the "the video just doesn't play" report. Cloudinary
+ * transcodes on delivery, so ask it for mp4 and keep the original behind it:
+ * the browser falls through to the next source on its own if the transcode is
+ * still processing.
+ */
+export function videoSourcesFor(item: PostMedia): Array<{ src: string; type?: string }> {
+  const path = item.url.split('?')[0] ?? item.url;
+  const extension = path.slice(path.lastIndexOf('.') + 1).toLowerCase();
+  if (PLAYABLE_FORMATS.has(extension)) return [{ src: item.url }];
+
+  const match = CLOUDINARY_VIDEO.exec(path);
+  const base = match?.[1];
+  const asset = match?.[2];
+  if (!base || !asset) return [{ src: item.url }];
+
+  return [
+    { src: `${base}q_auto/${asset.replace(/\.[^./]+$/, '')}.mp4`, type: 'video/mp4' },
+    { src: item.url },
+  ];
 }
 
 /**

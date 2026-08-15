@@ -102,6 +102,7 @@ export function AppShell({ children }: { children?: ReactNode }) {
 
   const otherRole = isIntern ? 'recruiter' : 'intern';
   const holdsOtherRole = account.roles.includes(otherRole);
+  const switchLabel = holdsOtherRole ? `Switch to ${otherRole}` : `Add ${otherRole}`;
 
   async function handleSwitch(): Promise<void> {
     if (!holdsOtherRole) {
@@ -123,9 +124,13 @@ export function AppShell({ children }: { children?: ReactNode }) {
         <div className="mx-auto flex w-full max-w-6xl items-center gap-3 px-4 py-2.5 pt-[calc(0.625rem+env(safe-area-inset-top))] sm:px-6">
           <NavLink
             to="/home"
-            className="rounded-lg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--ring)]"
+            aria-label="InternLink home"
+            className="shrink-0 rounded-lg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--ring)]"
           >
-            <Logo size="sm" />
+            {/* The wordmark costs about 95px, which is most of what a 360px bar
+                has spare — the mark alone carries it until there is room. */}
+            <Logo size="sm" markOnly className="sm:hidden" />
+            <Logo size="sm" className="hidden sm:inline-flex" />
           </NavLink>
 
           {/* Search sits in the top bar rather than the bottom nav: the nav is
@@ -136,7 +141,7 @@ export function AppShell({ children }: { children?: ReactNode }) {
             aria-label="Search"
             className={({ isActive }) =>
               cn(
-                'ml-1 flex h-9 min-w-9 flex-1 items-center gap-2 rounded-lg px-2.5 text-sm transition-colors duration-[160ms] sm:max-w-64',
+                'flex h-9 min-w-9 flex-1 items-center gap-2 rounded-lg px-2.5 text-sm transition-colors duration-[160ms] sm:max-w-64',
                 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--ring)]',
                 isActive
                   ? 'bg-brand-subtle text-brand-fg'
@@ -148,19 +153,23 @@ export function AppShell({ children }: { children?: ReactNode }) {
             <span className="hidden truncate sm:inline">Search people, posts, #topics</span>
           </NavLink>
 
-          <div className="ml-auto flex items-center gap-1.5">
+          {/* `shrink-0`: without it the whole cluster compresses, and the parts
+              that cannot compress — a nowrap button, a fixed-size avatar — spill
+              out of the right edge of the bar instead. Search yields the space. */}
+          <div className="ml-auto flex shrink-0 items-center gap-1.5">
             <Button
               variant="ghost"
               size="sm"
               onClick={handleSwitch}
               isLoading={switchRole.isPending}
               leftIcon={<Repeat />}
-              title={holdsOtherRole ? `Switch to ${otherRole}` : `Set up your ${otherRole} profile`}
+              aria-label={switchLabel}
+              title={switchLabel}
+              // Icon-only until the words fit. The label was the single widest
+              // thing in the bar on a phone.
+              className="max-md:w-9 max-md:gap-0 max-md:px-0"
             >
-              <span className="hidden md:inline">
-                {holdsOtherRole ? `Switch to ${otherRole}` : `Add ${otherRole}`}
-              </span>
-              <span className="md:hidden">{isIntern ? 'Intern' : 'Recruiter'}</span>
+              <span className="hidden md:inline">{switchLabel}</span>
             </Button>
 
             <NavLink
@@ -172,19 +181,24 @@ export function AppShell({ children }: { children?: ReactNode }) {
               }
               className={({ isActive }) =>
                 cn(
-                  'relative flex size-9 items-center justify-center rounded-lg transition-colors duration-[160ms]',
+                  'flex size-9 items-center justify-center rounded-lg transition-colors duration-[160ms]',
                   'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--ring)]',
                   isActive ? 'bg-brand-subtle text-brand-fg' : 'text-fg-muted hover:bg-surface-sunken hover:text-fg',
                 )
               }
             >
-              <Bell aria-hidden="true" className="size-5" />
-              <Badge count={notificationCount} />
+              {/* Anchored to the icon rather than to the button: hung off the
+                  button's own edge, the badge reached across the gap and sat on
+                  top of the avatar next to it. */}
+              <span className="relative">
+                <Bell aria-hidden="true" className="size-5" />
+                <Badge count={notificationCount} />
+              </span>
             </NavLink>
 
             <NavLink
               to="/profile"
-              className="rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--ring)]"
+              className="shrink-0 rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--ring)]"
               aria-label="Your profile"
             >
               <Avatar
