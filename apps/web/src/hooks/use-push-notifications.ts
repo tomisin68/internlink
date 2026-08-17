@@ -9,6 +9,8 @@ import { toast } from '@/lib/stores';
 
 /** Remembered so a granted permission re-registers silently on the next visit. */
 const STORAGE_KEY = 'internlink.push.token';
+/** Set only when the user explicitly turns this device off inside InternLink. */
+const DISABLED_STORAGE_KEY = 'internlink.push.disabled';
 
 /**
  * `navigator.serviceWorker.ready` is a promise that never rejects: when
@@ -161,8 +163,17 @@ export function usePushNotifications(): {
       }
       if (cancelled) return;
 
-      if (Notification.permission === 'denied') setState('denied');
-      else if (Notification.permission === 'granted' && localStorage.getItem(STORAGE_KEY)) {
+      if (Notification.permission === 'denied') {
+        localStorage.removeItem(DISABLED_STORAGE_KEY);
+        setState('denied');
+      } else if (
+        Notification.permission === 'granted' &&
+        !localStorage.getItem(DISABLED_STORAGE_KEY)
+      ) {
+        // Permission is the durable browser-level setting. The cached token is
+        // just bookkeeping: it can disappear when site data is cleared, and FCM
+        // can rotate or prune registrations. Treat granted permission as on,
+        // then let the sync effect below mint/register the current token again.
         setState('on');
       } else setState('off');
     })();
@@ -200,13 +211,14 @@ export function usePushNotifications(): {
         const token = await issueToken(vapidKey);
         if (!token) return;
 
-        await pushApi.register({
-          token,
-          platform: 'web',
-          userAgent: navigator.userAgent.slice(0, 400),
-        });
-        localStorage.setItem(STORAGE_KEY, token);
-      } catch {
+      await pushApi.register({
+        token,
+        platform: 'web',
+        userAgent: navigator.userAgent.slice(0, 400),
+      });
+      localStorage.setItem(STORAGE_KEY, token);
+      localStorage.removeItem(DISABLED_STORAGE_KEY);
+    } catch {
         // Silent by design. This is background upkeep nobody asked for; the
         // explicit toggle below still reports its own failures loudly. Release
         // the claim so the next mount retries rather than assuming it is done.
@@ -288,6 +300,7 @@ export function usePushNotifications(): {
       });
 
       localStorage.setItem(STORAGE_KEY, token);
+      localStorage.removeItem(DISABLED_STORAGE_KEY);
       syncedAccountId = accountId;
       setState('on');
       toast.success('Notifications are on', 'We will let you know when a message arrives.');
@@ -303,6 +316,7 @@ export function usePushNotifications(): {
   const disable = useCallback(async (): Promise<void> => {
     const token = localStorage.getItem(STORAGE_KEY);
     localStorage.removeItem(STORAGE_KEY);
+    localStorage.setItem(DISABLED_STORAGE_KEY, 'true');
     syncedAccountId = null;
     setState('off');
 

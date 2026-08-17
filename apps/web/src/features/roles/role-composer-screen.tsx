@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
 import { ArrowLeft, MapPin, ShieldAlert } from 'lucide-react';
 import type { PostMedia, WorkMode } from '@internlink/shared-types';
@@ -13,7 +13,7 @@ import { MediaPicker } from '@/components/ui/media-picker';
 import { OptionCard } from '@/components/ui/option-card';
 import { TagInput } from '@/components/ui/tag-input';
 import { Alert } from '@/components/ui/feedback';
-import { listingsApi, queryKeys } from '@/lib/api-endpoints';
+import { listingsApi, profileApiClient, queryKeys } from '@/lib/api-endpoints';
 import { useSession } from '@/features/auth/use-auth';
 import { toast } from '@/lib/stores';
 import { ApiRequestError } from '@/lib/api-client';
@@ -36,7 +36,16 @@ type ComposerInput = z.infer<typeof ComposerSchema>;
 export function RoleComposerScreen() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { company } = useSession();
+  const { account, company: sessionCompany } = useSession();
+
+  const { data: recruiterProfile } = useQuery({
+    queryKey: queryKeys.recruiterProfile,
+    queryFn: profileApiClient.getRecruiter,
+    enabled: account?.activeRole === 'recruiter',
+    staleTime: 0,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: 'always',
+  });
 
   const [skills, setSkills] = useState<string[]>([]);
   const [media, setMedia] = useState<PostMedia[]>([]);
@@ -57,6 +66,7 @@ export function RoleComposerScreen() {
 
   const description = watch('description') ?? '';
   const title = watch('title') ?? '';
+  const company = recruiterProfile?.company ?? sessionCompany;
   const isVerified = company?.verificationStatus === 'verified';
 
   // Hashtags typed into the copy are merged in server-side; echoing them back

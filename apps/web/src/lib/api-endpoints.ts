@@ -81,6 +81,7 @@ export const queryKeys = {
   myApplications: ['applications', 'mine'] as const,
   pipeline: (listingId: string) => ['applications', 'listing', listingId] as const,
   internProfile: ['profiles', 'intern', 'me'] as const,
+  recruiterProfile: ['profiles', 'recruiter', 'me'] as const,
   publicProfile: (accountId: string) => ['profiles', 'public', accountId] as const,
   completeness: ['profiles', 'intern', 'completeness'] as const,
 };

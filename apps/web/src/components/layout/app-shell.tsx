@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useEffect, type ReactNode } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
@@ -24,8 +24,9 @@ import { Avatar } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/cn';
 import { messagingApi, queryKeys } from '@/lib/api-endpoints';
+import { authApi } from '@/features/auth/auth-api';
 import { useSession, useSignOut, useSwitchRole } from '@/features/auth/use-auth';
-import { toast } from '@/lib/stores';
+import { toast, useSessionStore } from '@/lib/stores';
 
 interface NavItem {
   to: string;
@@ -71,6 +72,21 @@ export function AppShell({ children }: { children?: ReactNode }) {
   const { pathname } = useLocation();
   const switchRole = useSwitchRole();
   const signOut = useSignOut();
+  const setSession = useSessionStore((s) => s.setSession);
+
+  const { data: refreshedSession } = useQuery({
+    queryKey: queryKeys.session,
+    queryFn: authApi.me,
+    enabled: Boolean(account),
+    staleTime: 0,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: 'always',
+    refetchInterval: 60_000,
+  });
+
+  useEffect(() => {
+    if (refreshedSession) setSession(refreshedSession);
+  }, [refreshedSession, setSession]);
 
   const { data: summary } = useQuery({
     queryKey: queryKeys.inboxSummary,
