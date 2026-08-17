@@ -1,4 +1,4 @@
-import { Bell, BellOff, BellRing, Loader2 } from 'lucide-react';
+import { Bell, BellOff, BellRing, Loader2, Smartphone } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { usePushNotifications } from '@/hooks/use-push-notifications';
 
@@ -16,7 +16,7 @@ import { usePushNotifications } from '@/hooks/use-push-notifications';
 export function NotificationSettings() {
   const { state, enable, disable, sendTest } = usePushNotifications();
 
-  if (state === 'unsupported' || state === 'unconfigured') return null;
+  if (state === 'checking' || state === 'unsupported' || state === 'unconfigured') return null;
 
   return (
     <section className="panel mt-4 p-5">
@@ -26,7 +26,25 @@ export function NotificationSettings() {
         application moves forward.
       </p>
 
-      {state === 'denied' ? (
+      {state === 'needs-install' ? (
+        /**
+         * iOS, in a browser tab. Safari grants web push only to an installed
+         * app, so there is nothing to toggle yet — and saying so beats the old
+         * behaviour, which was to detect a missing `Notification` API and
+         * render nothing at all. An iPhone user was left with no explanation
+         * for why notifications never arrived.
+         */
+        <div className="flex items-start gap-3 rounded-xl bg-surface-sunken p-3.5">
+          <Smartphone aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-fg-subtle" />
+          <div>
+            <p className="text-sm font-medium text-fg">Add InternLink to your Home Screen first</p>
+            <p className="mt-0.5 text-xs text-fg-subtle">
+              On iPhone and iPad, Safari only delivers notifications to an installed app. The
+              steps are just below.
+            </p>
+          </div>
+        </div>
+      ) : state === 'denied' ? (
         <div className="flex items-start gap-3 rounded-xl bg-surface-sunken p-3.5">
           <BellOff aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-fg-subtle" />
           <div>

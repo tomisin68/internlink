@@ -30,8 +30,8 @@ import { CompletenessCard } from './completeness-card';
 import { ProfileEditor } from './profile-editor';
 import { ProfileHeaderEditor } from './profile-header-editor';
 import { ProfilePosts } from './profile-posts';
+import { InstallSettingsCard } from '@/components/layout/app-prompts';
 import { NotificationSettings } from './notification-settings';
-import { PushPrompt } from './push-prompt';
 
 type Tab = 'profile' | 'posts' | 'views';
 
@@ -137,8 +137,6 @@ export function ProfileScreen() {
           </div>
         </div>
       </article>
-
-      <PushPrompt />
 
       {!editing && (
         <div
@@ -316,6 +314,7 @@ export function ProfileScreen() {
           </nav>
 
           <NotificationSettings />
+          <InstallSettingsCard />
 
           <SettingsPanel onSignOut={() => void signOut()} />
         </>

@@ -1,20 +1,82 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { deleteToken, getMessaging, getToken, isSupported, onMessage } from 'firebase/messaging';
 import { firebaseApp, isFirebaseConfigured } from '@/lib/firebase';
 import { pushApi } from '@/lib/api-endpoints';
+import { isIosDevice, isStandalone } from '@/lib/pwa';
+import { useSession } from '@/features/auth/use-auth';
 import { toast } from '@/lib/stores';
 
 /** Remembered so a granted permission re-registers silently on the next visit. */
 const STORAGE_KEY = 'internlink.push.token';
 
+/**
+ * `navigator.serviceWorker.ready` is a promise that never rejects: when
+ * registration has failed there is simply no active worker and it hangs
+ * forever. Awaiting it bare left "Turn on" spinning with nothing to show.
+ */
+const SW_READY_TIMEOUT_MS = 8000;
+
+/**
+ * Two pieces of module state, because both facts are per *device*, not per
+ * component instance — and this hook is now mounted more than once at a time
+ * (the prompt in the shell, the switch in settings). Kept as refs they would
+ * duplicate: two foreground subscriptions means every message toasts twice,
+ * and two sync effects means two identical writes on every load.
+ */
+let foregroundOwner: symbol | null = null;
+let syncedAccountId: string | null = null;
+
 export type PushState =
+  /**
+   * Nothing is known yet. Resolving the real state needs an await (`isSupported`
+   * probes for a push manager and IndexedDB), so this cannot start at `off`:
+   * every consumer would render "Turn on notifications" for a frame or two and
+   * then yank it away on a browser that never supported push in the first place.
+   */
+  | 'checking'
   | 'unsupported'
+  /** iOS in a browser tab: real push, but only once the app is installed. */
+  | 'needs-install'
   | 'unconfigured'
   | 'denied'
   | 'off'
   | 'enabling'
   | 'on';
+
+async function swRegistration(): Promise<ServiceWorkerRegistration | undefined> {
+  if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return undefined;
+
+  return Promise.race([
+    navigator.serviceWorker.ready,
+    new Promise<undefined>((resolve) => {
+      setTimeout(resolve, SW_READY_TIMEOUT_MS, undefined);
+    }),
+  ]);
+}
+
+/**
+ * Asks FCM for this device's token.
+ *
+ * The registration has to be passed explicitly. Left to itself the SDK goes
+ * looking for `/firebase-messaging-sw.js`, which we deliberately do not ship —
+ * and because Hosting rewrites every unmatched path to the SPA shell, that
+ * request returns HTML rather than a 404, so registration fails on a MIME error
+ * instead of anything that reads like a missing file.
+ */
+async function issueToken(vapidKey: string): Promise<string | null> {
+  if (!(await isSupported().catch(() => false))) return null;
+
+  const registration = await swRegistration();
+  if (!registration) {
+    throw new Error('The background worker has not started yet. Reload the page and try again.');
+  }
+
+  return getToken(getMessaging(firebaseApp()), {
+    vapidKey,
+    serviceWorkerRegistration: registration,
+  });
+}
 
 /**
  * FR-601 — web push, over Firebase Cloud Messaging.
@@ -34,14 +96,23 @@ export function usePushNotifications(): {
   disable: () => Promise<void>;
   sendTest: () => Promise<void>;
 } {
-  const [state, setState] = useState<PushState>('off');
+  const [state, setState] = useState<PushState>('checking');
+  const { account } = useSession();
+  const accountId = account?.id ?? null;
 
-  const { data: capabilities } = useQuery({
+  const {
+    data: capabilities,
+    isPending: capabilitiesPending,
+    isError: capabilitiesFailed,
+  } = useQuery({
     queryKey: ['notifications', 'push', 'status'],
     queryFn: pushApi.status,
     staleTime: Infinity,
     retry: false,
+    enabled: Boolean(accountId),
   });
+
+  const vapidKey = capabilities?.vapidKey ?? null;
 
   // Resolve the starting state once the environment is known.
   useEffect(() => {
@@ -52,12 +123,39 @@ export function usePushNotifications(): {
         if (!cancelled) setState('unsupported');
         return;
       }
+
+      // Hold until the server has said whether push is configured at all.
+      // Offering the switch before that answer lands lets someone tap it, sit
+      // through the browser's permission dialog, and only then be told this
+      // environment has no push key — having spent the one prompt they get.
+      if (capabilitiesPending) {
+        if (!cancelled) setState('checking');
+        return;
+      }
+
+      /**
+       * iOS is checked before capability, not after.
+       *
+       * Safari grants web push only to a PWA that has been added to the Home
+       * Screen; in a tab `window.Notification` is not even defined. Falling
+       * through to the generic check would report `unsupported` and render
+       * nothing, telling an iPhone user that notifications are impossible when
+       * the actual answer is one Share-sheet tap away. This is why iPhone users
+       * in particular saw notifications only while the app was open.
+       */
+      if (isIosDevice() && !isStandalone()) {
+        if (!cancelled) setState('needs-install');
+        return;
+      }
+
       // Safari below 16.4 and every browser in a non-secure context land here.
       if (!('Notification' in window) || !(await isSupported().catch(() => false))) {
         if (!cancelled) setState('unsupported');
         return;
       }
-      if (capabilities && !capabilities.available) {
+      // A failed status call is treated exactly like a missing key. We cannot
+      // confirm push works, and a switch that might not is worse than none.
+      if (capabilitiesFailed || !capabilities?.available) {
         if (!cancelled) setState('unconfigured');
         return;
       }
@@ -72,7 +170,50 @@ export function usePushNotifications(): {
     return () => {
       cancelled = true;
     };
-  }, [capabilities]);
+  }, [capabilities, capabilitiesPending, capabilitiesFailed]);
+
+  /**
+   * Keeps the server's copy of this device's token current.
+   *
+   * Registration used to happen exactly once — the moment someone tapped "Turn
+   * on" — and never again. Three things rotted quietly because of that:
+   *
+   *  - FCM rotates tokens. A rotated token is a dead row on our side, while the
+   *    device still reports itself as "on" and receives nothing.
+   *  - `sendToAccounts` prunes tokens FCM reports as gone, and nothing ever put
+   *    them back. One bad delivery window turned push off permanently.
+   *  - The token document is keyed by the token and stamped with an accountId,
+   *    so on a shared browser it kept belonging to whoever first enabled it.
+   *    The next person to sign in got nothing, and the first person's messages
+   *    kept buzzing a device that was no longer theirs.
+   *
+   * Re-registering on load, and again whenever the signed-in account changes,
+   * fixes all three for the cost of one write.
+   */
+  useEffect(() => {
+    if (state !== 'on' || !accountId || !vapidKey) return;
+    if (syncedAccountId === accountId) return;
+    syncedAccountId = accountId;
+
+    void (async () => {
+      try {
+        const token = await issueToken(vapidKey);
+        if (!token) return;
+
+        await pushApi.register({
+          token,
+          platform: 'web',
+          userAgent: navigator.userAgent.slice(0, 400),
+        });
+        localStorage.setItem(STORAGE_KEY, token);
+      } catch {
+        // Silent by design. This is background upkeep nobody asked for; the
+        // explicit toggle below still reports its own failures loudly. Release
+        // the claim so the next mount retries rather than assuming it is done.
+        syncedAccountId = null;
+      }
+    })();
+  }, [state, accountId, vapidKey]);
 
   /**
    * Foreground messages.
@@ -81,23 +222,46 @@ export function usePushNotifications(): {
    * since the user is already looking at the app. Surfacing it as a toast keeps
    * the behaviour consistent without a second system-level popup.
    */
+  const listenerId = useRef<symbol | null>(null);
+  listenerId.current ??= Symbol('push-foreground');
+
   useEffect(() => {
     if (state !== 'on' || !isFirebaseConfigured) return;
 
+    // First mount to get here owns the subscription; any other instance sits
+    // this one out rather than adding a second toast for the same message.
+    const id = listenerId.current;
+    if (foregroundOwner && foregroundOwner !== id) return;
+    foregroundOwner = id;
+
+    let cancelled = false;
     let unsubscribe: (() => void) | undefined;
+
     void (async () => {
       if (!(await isSupported().catch(() => false))) return;
+      if (cancelled) return;
       unsubscribe = onMessage(getMessaging(firebaseApp()), (payload) => {
         const data = payload.data ?? {};
         if (data.title) toast.success(data.title, data.body);
       });
     })();
 
-    return () => unsubscribe?.();
+    return () => {
+      cancelled = true;
+      unsubscribe?.();
+      if (foregroundOwner === id) foregroundOwner = null;
+    };
   }, [state]);
 
   const enable = useCallback(async (): Promise<void> => {
-    if (!capabilities?.vapidKey) {
+    if (state === 'needs-install') {
+      toast.info(
+        'Install InternLink first',
+        'On iPhone and iPad, notifications only work once the app is on your Home Screen.',
+      );
+      return;
+    }
+    if (!vapidKey) {
       toast.error('Notifications are not available', 'This environment has no push key set up.');
       return;
     }
@@ -110,16 +274,7 @@ export function usePushNotifications(): {
         return;
       }
 
-      // The PWA service worker (generated by vite-plugin-pwa) is what receives
-      // the push, so registration has to be handed to FCM explicitly — the
-      // default lookup expects a firebase-messaging-sw.js we do not ship.
-      const registration = await navigator.serviceWorker.ready;
-
-      const token = await getToken(getMessaging(firebaseApp()), {
-        vapidKey: capabilities.vapidKey,
-        serviceWorkerRegistration: registration,
-      });
-
+      const token = await issueToken(vapidKey);
       if (!token) {
         setState('off');
         toast.error('Could not turn on notifications', 'Your browser did not issue a token.');
@@ -133,8 +288,9 @@ export function usePushNotifications(): {
       });
 
       localStorage.setItem(STORAGE_KEY, token);
+      syncedAccountId = accountId;
       setState('on');
-      toast.success('Notifications are on', 'We will let you know when your network posts.');
+      toast.success('Notifications are on', 'We will let you know when a message arrives.');
     } catch (error) {
       setState('off');
       toast.error(
@@ -142,11 +298,12 @@ export function usePushNotifications(): {
         error instanceof Error ? error.message : 'Try again in a moment.',
       );
     }
-  }, [capabilities]);
+  }, [state, vapidKey, accountId]);
 
   const disable = useCallback(async (): Promise<void> => {
     const token = localStorage.getItem(STORAGE_KEY);
     localStorage.removeItem(STORAGE_KEY);
+    syncedAccountId = null;
     setState('off');
 
     // Deleting the FCM token first means the browser stops receiving even if

@@ -100,8 +100,17 @@ export function ThreadView() {
   const isOutgoingRequest = isPendingRequest && thread.initiatedBy === account.id;
   const isClosed = thread.state === 'blocked' || thread.state === 'declined';
 
+  /**
+   * The thread is exactly one viewport tall, minus both bars.
+   *
+   * It used to subtract only the header, so the composer — the last row of the
+   * column — landed at the very bottom of the screen, which is precisely where
+   * the fixed bottom nav sits. The input was there and typable, just covered.
+   * `--shell-nav` is 0 from `lg` up, where the nav becomes a rail, so one calc
+   * serves both layouts.
+   */
   return (
-    <div className="flex h-[calc(100dvh-3.5rem)] flex-col lg:h-[calc(100dvh-4.25rem)]">
+    <div className="flex h-[calc(100dvh-var(--shell-header)-var(--shell-nav))] flex-col">
       {/* ------------------------------------------------------- header -- */}
       <header className="flex items-center gap-3 border-b border-border-subtle bg-surface px-4 py-3">
         <IconButton
@@ -169,7 +178,7 @@ export function ThreadView() {
 
       {/* ------------------------------------------------------- footer -- */}
       {isIncomingRequest ? (
-        <div className="border-t border-border-subtle bg-surface p-4">
+        <div className="border-t border-border-subtle bg-surface p-4 lg:pb-[calc(1rem+env(safe-area-inset-bottom))]">
           <p className="mb-3 text-sm text-fg-muted">
             <span className="font-medium text-fg">{other?.name}</span> wants to message you. Accept
             to reply, or decline and they will not be able to write again.
@@ -200,7 +209,7 @@ export function ThreadView() {
           </div>
         </div>
       ) : isClosed ? (
-        <div className="border-t border-border-subtle bg-surface-sunken p-4 text-center text-sm text-fg-subtle">
+        <div className="border-t border-border-subtle bg-surface-sunken p-4 text-center text-sm text-fg-subtle lg:pb-[calc(1rem+env(safe-area-inset-bottom))]">
           This conversation is closed.
         </div>
       ) : (
@@ -211,7 +220,10 @@ export function ThreadView() {
             if (!body || send.isPending) return;
             send.mutate(body);
           }}
-          className="flex items-end gap-2 border-t border-border-subtle bg-surface p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))]"
+          // The home-indicator inset is only the composer's problem from `lg`
+          // up. Below that the bottom nav sits underneath it and is already
+          // padding for the inset — adding it here too left a dead 34px strip.
+          className="flex items-end gap-2 border-t border-border-subtle bg-surface p-3 lg:pb-[calc(0.75rem+env(safe-area-inset-bottom))]"
         >
           {/* Enter sends and Shift+Enter breaks the line — the convention every
               messaging app has trained people on. `MentionInput` owns Enter

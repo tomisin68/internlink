@@ -30,6 +30,29 @@
     />
 
     <script>
+      // Catches `beforeinstallprompt` before React exists.
+      //
+      // Chromium fires it as soon as the installability criteria are met, which
+      // on a warm cache is well before the app bundle has finished evaluating,
+      // and the event is single-shot: miss it and the browser will not fire it
+      // again for that page load, so there is no way to ever open the install
+      // dialog. A listener added inside a React effect loses that race often
+      // enough to look like the feature simply does not work.
+      //
+      // Park it on `window` and announce it; the app picks it up whenever it
+      // gets there, whether that is before or after this fires.
+      window.addEventListener('beforeinstallprompt', function (event) {
+        // Suppresses Chrome's own mini-infobar so ours is the only ask.
+        event.preventDefault();
+        window.__internlinkInstallPrompt = event;
+        window.dispatchEvent(new Event('internlink:installable'));
+      });
+      window.addEventListener('appinstalled', function () {
+        window.__internlinkInstallPrompt = undefined;
+      });
+    </script>
+
+    <script>
       // Runs before first paint. Without this, a dark-mode user gets a white
       // flash on every cold load — the single most noticeable quality tell in
       // an installed PWA.

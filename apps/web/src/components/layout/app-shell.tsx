@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
   Bell,
@@ -18,6 +18,7 @@ import {
   notificationKeys,
   notificationsApi,
 } from '@/features/notifications/notifications-screen';
+import { AppPrompts } from '@/components/layout/app-prompts';
 import { Logo } from '@/components/ui/logo';
 import { Avatar } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -67,6 +68,7 @@ function Badge({ count }: { count: number }) {
 export function AppShell({ children }: { children?: ReactNode }) {
   const { account, company } = useSession();
   const navigate = useNavigate();
+  const { pathname } = useLocation();
   const switchRole = useSwitchRole();
   const signOut = useSignOut();
 
@@ -85,6 +87,14 @@ export function AppShell({ children }: { children?: ReactNode }) {
     refetchInterval: 60_000,
     enabled: Boolean(account),
   });
+
+  /**
+   * An open thread sizes itself to the full viewport and puts its own composer
+   * on the bottom edge, so the shell's bottom allowance below would only add
+   * five rem of empty scroll underneath a screen that must not scroll at all.
+   * The inbox list is a normal scrolling screen and keeps it.
+   */
+  const isThreadOpen = /^\/messages\/[^/]+/.test(pathname);
 
   const isIntern = account?.activeRole === 'intern';
   const unread = (summary?.unreadThreads ?? 0) + (summary?.pendingRequests ?? 0);
@@ -295,7 +305,12 @@ export function AppShell({ children }: { children?: ReactNode }) {
         {/* ------------------------------------------------------ content -- */}
         <main
           id="app-content"
-          className="min-w-0 flex-1 pb-[calc(4.75rem+env(safe-area-inset-bottom))] lg:pb-10"
+          className={cn(
+            'min-w-0 flex-1',
+            // Clears the fixed bottom bar plus a little breathing room, so the
+            // last row of any list is reachable rather than tucked under it.
+            isThreadOpen ? 'pb-0' : 'pb-[calc(1.25rem+var(--shell-nav))] lg:pb-10',
+          )}
         >
           {children ?? <Outlet />}
         </main>
@@ -339,6 +354,10 @@ export function AppShell({ children }: { children?: ReactNode }) {
           ))}
         </ul>
       </nav>
+
+      {/* Install and notification asks, above the bottom bar. Suppressed on an
+          open thread, where that slot is the message composer. */}
+      {!isThreadOpen && <AppPrompts />}
     </div>
   );
 }

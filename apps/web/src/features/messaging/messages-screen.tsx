@@ -90,7 +90,8 @@ export function MessagesScreen() {
           </div>
         </header>
 
-        <div className="lg:h-[calc(100dvh-11rem)] lg:overflow-y-auto">
+        {/* 7.5rem is this pane's own header — the title and the two tabs. */}
+        <div className="lg:h-[calc(100dvh-var(--shell-header)-7.5rem)] lg:overflow-y-auto">
           {isLoading && (
             <div className="flex flex-col gap-3 p-4">
               {[0, 1, 2].map((i) => (

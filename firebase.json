@@ -22,7 +22,13 @@
   ],
   "hosting": {
     "public": "apps/web/dist",
-    "predeploy": ["npm --prefix \"$PROJECT_DIR\" run build:web"],
+    "//predeploy": [
+      "Hooks run from the directory holding firebase.json, so a plain npm script",
+      "is enough — and unlike \"$PROJECT_DIR\" it survives being run from a Windows",
+      "shell, where cmd.exe leaves $VAR unexpanded and npm goes looking for a",
+      "directory literally named $PROJECT_DIR."
+    ],
+    "predeploy": ["npm run build:web"],
     "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
     "rewrites": [
       {
@@ -41,6 +47,16 @@
         "//": "The service worker must never be cached, or users get stuck on an old build forever.",
         "source": "/sw.js",
         "headers": [{ "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }]
+      },
+      {
+        "//": "Same rule, same reason. push-sw.js is pulled into sw.js by importScripts and its filename carries no build hash, so Hosting's default hour-long max-age would keep serving the old push handler after a deploy — with sw.js itself already updated and pointing at it.",
+        "source": "/push-sw.js",
+        "headers": [{ "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }]
+      },
+      {
+        "//": "The manifest gates installability; a stale one keeps the install prompt wrong.",
+        "source": "/manifest.webmanifest",
+        "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
       },
       {
         "source": "/index.html",

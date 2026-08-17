@@ -17,3 +17,23 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv;
 }
+
+/**
+ * `beforeinstallprompt` is Chromium-only and still not in the DOM lib, so the
+ * event has to be described here before anything can hold onto one.
+ */
+interface BeforeInstallPromptEvent extends Event {
+  readonly platforms: readonly string[];
+  readonly userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>;
+  prompt(): Promise<void>;
+}
+
+interface WindowEventMap {
+  beforeinstallprompt: BeforeInstallPromptEvent;
+  appinstalled: Event;
+}
+
+interface Window {
+  /** Parked by the inline capture in index.html — see the comment there. */
+  __internlinkInstallPrompt?: BeforeInstallPromptEvent;
+}

@@ -12,6 +12,29 @@
     border-color: var(--border-default);
   }
 
+  /**
+   * Shell chrome, as quantities the rest of the app can subtract.
+   *
+   * The top bar is sticky and the mobile bottom bar is fixed, so any screen
+   * that wants to be exactly one viewport tall — the message thread is the
+   * only one so far — has to account for both. Writing the numbers out by
+   * hand is how the composer ended up *underneath* the bottom bar: the thread
+   * subtracted the header and nothing subtracted the nav, and there was no
+   * single place where that omission was visible.
+   */
+  :root {
+    --shell-header: calc(3.5rem + env(safe-area-inset-top));
+    --shell-nav: calc(3.5rem + env(safe-area-inset-bottom));
+  }
+
+  /* The bottom bar is mobile-only — from `lg` up it is a rail and takes no
+     vertical space, so every calc using this collapses to just the header. */
+  @media (width >= 64rem) {
+    :root {
+      --shell-nav: 0px;
+    }
+  }
+
   html {
     -webkit-text-size-adjust: 100%;
     -webkit-tap-highlight-color: transparent;
