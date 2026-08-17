@@ -241,6 +241,18 @@ export async function getSession(accountId: string): Promise<SessionPayload> {
   return buildSession(account);
 }
 
+/** Refreshes the account activity timestamp and the public presence document. */
+export async function touchPresence(accountId: string): Promise<{ lastActiveAt: string }> {
+  const lastActiveAt = nowIso();
+
+  await Promise.all([
+    db().collection(Collections.accounts).doc(accountId).update({ lastActiveAt }),
+    db().collection(Collections.presence).doc(accountId).set({ accountId, lastActiveAt }),
+  ]);
+
+  return { lastActiveAt };
+}
+
 /**
  * FR-104 — grants a role the account does not yet hold and makes it active.
  * Idempotent: re-selecting a held role just switches to it.

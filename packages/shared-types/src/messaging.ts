@@ -67,9 +67,26 @@ export const AttachmentSchema = z.object({
   name: z.string().max(200),
   mimeType: z.string().max(120),
   bytes: z.number().int().nonnegative(),
-  kind: z.enum(['image', 'file']),
+  kind: z.enum(['image', 'file', 'voice']),
+  durationSeconds: z.number().nonnegative().nullable().optional(),
 });
 export type Attachment = z.infer<typeof AttachmentSchema>;
+
+export const MessageStickerSchema = z.object({
+  id: z.string().min(1).max(80),
+  emoji: z.string().min(1).max(12),
+  label: z.string().min(1).max(80),
+});
+export type MessageSticker = z.infer<typeof MessageStickerSchema>;
+
+export const ReplyPreviewSchema = z.object({
+  messageId: IdSchema,
+  senderId: IdSchema,
+  body: z.string().max(180),
+  attachmentKind: z.enum(['image', 'file', 'voice']).nullable().default(null),
+  sticker: MessageStickerSchema.nullable().default(null),
+});
+export type ReplyPreview = z.infer<typeof ReplyPreviewSchema>;
 
 export const MessageSchema = z.object({
   id: IdSchema,
@@ -84,9 +101,13 @@ export const MessageSchema = z.object({
    */
   mentions: z
     .array(z.object({ accountId: IdSchema, displayName: z.string().min(1).max(140) }))
-    .max(10)
-    .default([]),
+      .max(10)
+      .default([]),
   attachments: z.array(AttachmentSchema).max(5),
+  /** Sticker-only messages keep the text body empty and render this instead. */
+  sticker: MessageStickerSchema.nullable().default(null),
+  /** Swipe-to-reply stores a durable preview so replies survive edits/deletes. */
+  replyTo: ReplyPreviewSchema.nullable().default(null),
   /** FR-507 — accounts that have read this message. */
   readBy: z.array(IdSchema).default([]),
   /** FR-1101 — set by the auto-flagger; the message still sends. */
@@ -108,16 +129,19 @@ export const SendMessageSchema = z
           name: z.string().max(200),
           mimeType: z.string().max(120),
           bytes: z.number().int().nonnegative(),
-          kind: z.enum(['image', 'file']),
+          kind: z.enum(['image', 'file', 'voice']),
+          durationSeconds: z.number().nonnegative().nullable().optional(),
         }),
       )
       .max(5)
       .default([]),
+    sticker: MessageStickerSchema.nullable().default(null),
+    replyToMessageId: IdSchema.nullable().optional(),
   })
-  // An empty body is fine when there is a file, and vice versa — but not both
-  // empty, which is what an accidental Enter keypress produces.
-  .refine((v) => v.body.length > 0 || v.attachments.length > 0, {
-    message: 'Write a message or attach a file',
+  // An empty body is fine when there is an attachment or sticker, and vice versa
+  // — but not all empty, which is what an accidental Enter keypress produces.
+  .refine((v) => v.body.length > 0 || v.attachments.length > 0 || Boolean(v.sticker), {
+    message: 'Write a message, add a voice note, or choose a sticker',
     path: ['body'],
   });
 export type SendMessageInput = z.infer<typeof SendMessageSchema>;

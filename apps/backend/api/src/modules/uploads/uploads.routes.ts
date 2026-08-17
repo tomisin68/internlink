@@ -103,6 +103,12 @@ export const UPLOAD_RULES: Record<
     formats: ['jpg', 'jpeg', 'png', 'webp'],
     resourceType: 'image',
   },
+  message_voice: {
+    folder: 'message-voice',
+    maxBytes: 15 * 1024 * 1024,
+    formats: ['webm', 'm4a', 'mp3', 'ogg', 'wav', 'aac', 'mp4'],
+    resourceType: 'auto',
+  },
   company_logo: {
     folder: 'company-logos',
     maxBytes: 5 * 1024 * 1024,

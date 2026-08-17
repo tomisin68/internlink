@@ -67,6 +67,16 @@ authRouter.get(
   }),
 );
 
+/** POST /v1/auth/presence — heartbeat used by chat online / last-seen status. */
+authRouter.post(
+  '/presence',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    if (!req.auth) throw unauthenticated();
+    sendOk(res, await authService.touchPresence(req.auth.accountId));
+  }),
+);
+
 /**
  * POST /v1/auth/role — FR-104. Grants a role and makes it active.
  *

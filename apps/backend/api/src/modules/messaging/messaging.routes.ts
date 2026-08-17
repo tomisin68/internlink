@@ -110,6 +110,8 @@ messagingRouter.post(
         senderId: req.auth.accountId,
         body: input.body,
         attachments: input.attachments,
+        sticker: input.sticker,
+        replyToMessageId: input.replyToMessageId ?? null,
       }),
     );
   }),

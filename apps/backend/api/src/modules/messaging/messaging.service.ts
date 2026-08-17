@@ -4,7 +4,9 @@ import type {
   Attachment,
   InboxSummary,
   Message,
+  MessageSticker,
   Paginated,
+  ReplyPreview,
   Thread,
   ThreadParticipant,
 } from '@internlink/shared-types';
@@ -140,6 +142,8 @@ export interface SendMessageArgs {
   senderId: string;
   body: string;
   attachments: Attachment[];
+  sticker?: MessageSticker | null;
+  replyToMessageId?: string | null;
 }
 
 /**
@@ -182,6 +186,9 @@ export async function sendMessage(args: SendMessageArgs): Promise<Message> {
 
   const scan = scanForScamPatterns(args.body);
   const mentions = await resolveMentions(senderId, args.body);
+  const replyTo = args.replyToMessageId
+    ? await buildReplyPreview(threadId, args.replyToMessageId)
+    : null;
   const ts = nowIso();
 
   const message: Omit<Message, 'id'> = {
@@ -190,6 +197,8 @@ export async function sendMessage(args: SendMessageArgs): Promise<Message> {
     body: args.body,
     mentions,
     attachments: args.attachments,
+    sticker: args.sticker ?? null,
+    replyTo,
     // The sender has trivially read their own message.
     readBy: [senderId],
     isFlagged: scan.isFlagged,
@@ -211,16 +220,18 @@ export async function sendMessage(args: SendMessageArgs): Promise<Message> {
     unreadIncrements[`unread.${id}`] = FieldValue.increment(1);
   }
 
+  const preview = messagePreview(args.body, args.attachments, args.sticker ?? null);
+
   await db()
     .collection(Collections.messageThreads)
     .doc(threadId)
     .update({
       ...unreadIncrements,
       lastMessage: {
-        body: args.body.slice(0, 240),
+        body: preview,
         senderId,
         sentAt: ts,
-        hasAttachment: args.attachments.length > 0,
+        hasAttachment: args.attachments.length > 0 || Boolean(args.sticker),
       },
       updatedAt: ts,
     });
@@ -247,7 +258,7 @@ export async function sendMessage(args: SendMessageArgs): Promise<Message> {
         messageId: messageRef.id,
         senderId,
         byAccountId: senderId,
-        preview: args.body.slice(0, 160),
+        preview: preview.slice(0, 160),
       },
       urgent: false,
       // FR-503 — muted threads stay in the list but stop pushing.
@@ -268,6 +279,46 @@ export async function sendMessage(args: SendMessageArgs): Promise<Message> {
   }
 
   return { id: messageRef.id, ...message };
+}
+
+function messagePreview(
+  body: string,
+  attachments: Attachment[],
+  sticker: MessageSticker | null,
+): string {
+  const trimmed = body.trim();
+  if (trimmed) return trimmed.slice(0, 240);
+  if (sticker) return `${sticker.emoji} ${sticker.label}`;
+  const first = attachments[0];
+  if (first?.kind === 'voice') return 'Voice note';
+  if (first?.kind === 'image') return 'Image attachment';
+  if (first) return first.name || 'Attachment';
+  return '';
+}
+
+async function buildReplyPreview(
+  threadId: string,
+  messageId: string,
+): Promise<ReplyPreview | null> {
+  const snap = await db()
+    .collection(Collections.messageThreads)
+    .doc(threadId)
+    .collection(Collections.messages)
+    .doc(messageId)
+    .get();
+
+  if (!snap.exists) return null;
+  const data = snap.data() as Partial<Message>;
+  const attachments = (data.attachments ?? []) as Attachment[];
+  const sticker = (data.sticker ?? null) as MessageSticker | null;
+
+  return {
+    messageId,
+    senderId: data.senderId ?? '',
+    body: messagePreview(data.body ?? '', attachments, sticker).slice(0, 180),
+    attachmentKind: attachments[0]?.kind ?? null,
+    sticker,
+  };
 }
 
 /** FR-506 — accept, decline, or decline-and-block a pending request. */

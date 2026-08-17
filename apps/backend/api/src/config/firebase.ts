@@ -115,6 +115,8 @@ export const Collections = {
   notifications: 'notifications',
   /** FCM registrations, keyed by the token — see PushTokenSchema. */
   pushTokens: 'pushTokens',
+  /** Minimal live status documents, keyed by account ID. */
+  presence: 'presence',
   moderationFlags: 'moderationFlags',
   adUnits: 'adUnits',
   adEvents: 'adEvents',

@@ -211,6 +211,14 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // ------------------------------------------------------------- presence --
+    // Public, minimal live status. The API writes it from authenticated
+    // heartbeats; clients can read it to show online / last-seen in chats.
+    match /presence/{accountId} {
+      allow get, list: if canRead();
+      allow write: if false;
+    }
+
     // ---------------------------------------------------------- moderation ---
     // §9.3 — the queue is staff-only. A reporter learning the status of their
     // own report goes through the API, which returns only what is safe.

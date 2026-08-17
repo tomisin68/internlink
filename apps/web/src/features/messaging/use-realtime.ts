@@ -1,7 +1,8 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   collection,
+  doc,
   limit,
   onSnapshot,
   orderBy,
@@ -9,9 +10,10 @@ import {
   where,
   type Unsubscribe,
 } from 'firebase/firestore';
-import type { Message, Thread } from '@internlink/shared-types';
+import type { Message, Presence, Thread } from '@internlink/shared-types';
 import { db, isFirebaseConfigured } from '@/lib/firebase';
 import { queryKeys } from '@/lib/api-endpoints';
+import { api } from '@/lib/api-client';
 
 /**
  * Realtime messaging via Firestore listeners.
@@ -73,6 +75,8 @@ export function useRealtimeMessages(threadId: string | undefined, enabled = true
                 // Absent on every message written before tagging shipped.
                 mentions: (data.mentions as Message['mentions']) ?? [],
                 attachments: (data.attachments as Message['attachments']) ?? [],
+                sticker: (data.sticker as Message['sticker']) ?? null,
+                replyTo: (data.replyTo as Message['replyTo']) ?? null,
                 readBy: (data.readBy as string[]) ?? [],
                 isFlagged: Boolean(data.isFlagged),
                 flagReasons: (data.flagReasons as string[]) ?? [],
@@ -102,6 +106,72 @@ export function useRealtimeMessages(threadId: string | undefined, enabled = true
 
     return () => unsubscribe?.();
   }, [threadId, enabled, queryClient]);
+}
+
+export function useRealtimePresence(
+  accountId: string | undefined,
+  enabled = true,
+): Presence | null {
+  const [presence, setPresence] = useState<Presence | null>(null);
+
+  useEffect(() => {
+    if (!accountId || !enabled || !isFirebaseConfigured) {
+      setPresence(null);
+      return;
+    }
+
+    let unsubscribe: Unsubscribe | undefined;
+
+    try {
+      unsubscribe = onSnapshot(
+        doc(db(), 'presence', accountId),
+        (snapshot) => {
+          if (!snapshot.exists()) {
+            setPresence(null);
+            return;
+          }
+          const data = snapshot.data();
+          setPresence({
+            accountId,
+            lastActiveAt: toIso(data.lastActiveAt),
+          });
+        },
+        (error) => {
+          console.warn('Realtime presence unavailable', error);
+        },
+      );
+    } catch (error) {
+      console.warn('Could not subscribe to presence', error);
+    }
+
+    return () => unsubscribe?.();
+  }, [accountId, enabled]);
+
+  return presence;
+}
+
+export function usePresenceHeartbeat(enabled = true): void {
+  useEffect(() => {
+    if (!enabled) return;
+
+    let stopped = false;
+    const touch = () => {
+      if (stopped || document.visibilityState === 'hidden') return;
+      void api.post<{ lastActiveAt: string }>('/auth/presence').catch(() => undefined);
+    };
+
+    touch();
+    const interval = window.setInterval(touch, 45_000);
+    window.addEventListener('focus', touch);
+    document.addEventListener('visibilitychange', touch);
+
+    return () => {
+      stopped = true;
+      window.clearInterval(interval);
+      window.removeEventListener('focus', touch);
+      document.removeEventListener('visibilitychange', touch);
+    };
+  }, [enabled]);
 }
 
 /**

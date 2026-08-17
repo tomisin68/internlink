@@ -119,6 +119,8 @@ export const UploadKindSchema = z.enum([
   'verification_doc',
   /** Feed carousel content — images and video share one kind and one folder. */
   'post_media',
+  /** Audio recorded from the message composer. */
+  'message_voice',
   /** Profile cover image. Wider tolerance than an avatar, stills only. */
   'banner',
 ]);
@@ -170,6 +172,13 @@ export const PushCapabilitiesSchema = z.object({
   vapidKey: z.string().nullable(),
 });
 export type PushCapabilities = z.infer<typeof PushCapabilitiesSchema>;
+
+/** Realtime presence is a public, minimal status document: no email, roles, or profile data. */
+export const PresenceSchema = z.object({
+  accountId: z.string().min(1).max(128),
+  lastActiveAt: z.string().datetime({ offset: true }),
+});
+export type Presence = z.infer<typeof PresenceSchema>;
 
 export const NotificationPreferencesSchema = z.object({
   /** Someone you follow posted. The reason most people enable push at all. */

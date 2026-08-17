@@ -21,6 +21,7 @@ import type {
   Listing,
   MatchResult,
   Message,
+  SendMessageInput,
   Paginated,
   PersonSummary,
   Post,
@@ -321,8 +322,8 @@ export const messagingApi = {
   startThread: (input: { recipientId: string; body: string; applicationId?: string | null }) =>
     api.post<{ thread: Thread; message: Message }>('/messages/threads', input),
 
-  sendMessage: (threadId: string, body: string) =>
-    api.post<Message>(`/messages/threads/${threadId}/messages`, { body, attachments: [] }),
+  sendMessage: (threadId: string, input: SendMessageInput) =>
+    api.post<Message>(`/messages/threads/${threadId}/messages`, input),
 
   markRead: (threadId: string) => api.post<{ read: boolean }>(`/messages/threads/${threadId}/read`),
 
