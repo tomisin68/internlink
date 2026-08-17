@@ -23,6 +23,7 @@ import { Logo } from '@/components/ui/logo';
 import { Avatar } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/cn';
+import { isAccountVerified, isCompanyVerified } from '@/lib/verification';
 import { messagingApi, queryKeys } from '@/lib/api-endpoints';
 import { authApi } from '@/features/auth/auth-api';
 import { useSession, useSignOut, useSwitchRole } from '@/features/auth/use-auth';
@@ -231,7 +232,7 @@ export function AppShell({ children }: { children?: ReactNode }) {
                 name={account.displayName}
                 src={account.photoUrl}
                 size="sm"
-                verified={account.verificationTiers.length > 0}
+                verified={isAccountVerified(account)}
               />
             </NavLink>
 
@@ -305,12 +306,12 @@ export function AppShell({ children }: { children?: ReactNode }) {
                   src={company.logoUrl}
                   size="sm"
                   shape="rounded"
-                  verified={company.verificationStatus === 'verified'}
+                  verified={isCompanyVerified(company)}
                 />
                 <div className="min-w-0">
                   <p className="truncate text-sm font-semibold text-fg">{company.name}</p>
                   <p className="truncate text-xs text-fg-subtle">
-                    {company.verificationStatus === 'verified' ? 'Verified' : 'Verification pending'}
+                    {isCompanyVerified(company) ? 'Verified' : 'Verification pending'}
                   </p>
                 </div>
               </div>

@@ -16,6 +16,7 @@ import { Alert } from '@/components/ui/feedback';
 import { listingsApi, profileApiClient, queryKeys } from '@/lib/api-endpoints';
 import { useSession } from '@/features/auth/use-auth';
 import { toast } from '@/lib/stores';
+import { isCompanyVerified } from '@/lib/verification';
 import { ApiRequestError } from '@/lib/api-client';
 import { SKILL_SUGGESTIONS, WORK_MODE_OPTIONS } from '@/features/profile/constants';
 
@@ -67,7 +68,7 @@ export function RoleComposerScreen() {
   const description = watch('description') ?? '';
   const title = watch('title') ?? '';
   const company = recruiterProfile?.company ?? sessionCompany;
-  const isVerified = company?.verificationStatus === 'verified';
+  const isVerified = isCompanyVerified(company);
 
   // Hashtags typed into the copy are merged in server-side; echoing them back
   // is what stops someone adding the same tag twice.

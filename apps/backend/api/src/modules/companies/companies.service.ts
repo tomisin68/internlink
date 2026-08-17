@@ -52,16 +52,39 @@ export async function createRecruiterProfile(
     ? db().collection(Collections.companies).doc(existing.companyId)
     : db().collection(Collections.companies).doc();
 
+  const existingCompany = existing?.companyId ? await getCompany(existing.companyId) : null;
+
   const cacNumber = nullify(input.company.cacNumber);
+
+  /**
+   * Verification is only *decided* here for a company being created for the
+   * first time. Re-running the wizard against a company that already exists
+   * leaves its verification exactly as the moderator left it — the previous
+   * shape recomputed the status on every run, so a recruiter who reopened the
+   * wizard to fix a typo silently threw away an approval nobody could see had
+   * been thrown away.
+   */
+  const verification: Pick<
+    Company,
+    'verificationStatus' | 'verificationDocUrl' | 'verifiedAt'
+  > = existingCompany
+    ? {
+        verificationStatus: existingCompany.verificationStatus,
+        verificationDocUrl: existingCompany.verificationDocUrl,
+        verifiedAt: existingCompany.verifiedAt,
+      }
+    : {
+        // Submitting a CAC number moves straight into the moderation queue
+        // (FR-902); leaving it blank keeps the company in `unsubmitted`.
+        verificationStatus: cacNumber ? 'pending' : 'unsubmitted',
+        verificationDocUrl: null,
+        verifiedAt: null,
+      };
 
   const companyDoc: Omit<Company, 'id'> = {
     name: input.company.name,
     cacNumber,
-    // Submitting a CAC number moves straight into the moderation queue
-    // (FR-902); leaving it blank keeps the company in `unsubmitted`.
-    verificationStatus: cacNumber ? 'pending' : 'unsubmitted',
-    verificationDocUrl: null,
-    verifiedAt: null,
+    ...verification,
     logoUrl: nullify(input.company.logoUrl),
     website: nullify(input.company.website),
     industry: input.company.industry,
@@ -69,7 +92,7 @@ export async function createRecruiterProfile(
     headquarters: input.company.headquarters,
     description: input.company.description,
     ownerAccountId: accountId,
-    createdAt: existing ? (await getCompany(companyRef.id))?.createdAt ?? ts : ts,
+    createdAt: existingCompany?.createdAt ?? ts,
     updatedAt: ts,
   };
 

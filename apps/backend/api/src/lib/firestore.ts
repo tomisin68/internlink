@@ -6,6 +6,7 @@ import type {
   Query,
 } from 'firebase-admin/firestore';
 import type { Paginated } from '@internlink/shared-types';
+import { normaliseVerification } from './verification.js';
 
 /** Firestore stores Timestamps; the API contract says ISO-8601 strings. */
 export function toIso(value: unknown): string | null {
@@ -28,6 +29,10 @@ export const serverTimestamp = () => FieldValue.serverTimestamp();
  * Firestore rejects `undefined` outright, and a nested Timestamp that slips
  * through serialises as `{_seconds, _nanoseconds}` — which then fails Zod
  * parsing on the client with a message that points nowhere useful.
+ *
+ * Also canonicalises verification fields, because this is the one function
+ * every read in the app passes through — see `verification.ts` for why that
+ * matters.
  */
 export function serialise<T = DocumentData>(input: unknown): T {
   if (input === null || input === undefined) return input as T;
@@ -41,6 +46,7 @@ export function serialise<T = DocumentData>(input: unknown): T {
       if (value === undefined) continue;
       out[key] = serialise(value);
     }
+    normaliseVerification(out);
     return out as T;
   }
   return input as T;

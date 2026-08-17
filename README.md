@@ -362,6 +362,47 @@ recruiter whose registration is still in progress.
 
 ---
 
+## Granting verification by hand
+
+There is no admin UI for verification yet, so a moderator grants it in the
+Firestore console. The API canonicalises what it reads
+(`apps/backend/api/src/lib/verification.ts`), so the console edit does not have
+to be exact — but these are the fields it is looking for.
+
+**A company** — `companies/{companyId}`:
+
+| Field | Set it to |
+| --- | --- |
+| `verificationStatus` | `verified` |
+| `isVerified` *(boolean, alternative)* | `true` |
+
+Either one is enough. Case and surrounding spaces do not matter, and `approved`
+/ `active` are read as `verified` too. Filling in `verifiedAt` alone also counts
+— except on a company already marked `rejected` or `expired`, where a
+moderator's explicit decision is never overridden by inference. To revoke, set
+`isVerified` to `false` or put `verificationStatus` back to `unsubmitted`.
+
+**A person** — `accounts/{accountId}`:
+
+| Field | Set it to |
+| --- | --- |
+| `isVerified` *(boolean)* | `true` |
+| `verificationTiers` *(array, alternative)* | `["verified_identity"]` |
+
+The boolean is the easy path: it grants `verified_identity`, which is what the
+badge reads. Use `verificationTiers` when the tier matters —
+`verified_school_email` for a confirmed student address, `verified_company` for
+a confirmed employer. A comma-separated string works too, because building an
+array in the console is fiddly. Setting `isVerified` to `false` clears the
+badge.
+
+Both take effect on the next read — within a minute in an open tab, since the
+shell refetches the session on that interval. Nothing is written back to the
+document: it keeps whatever was typed, and only the value the API serves is
+canonicalised.
+
+---
+
 ## Things worth knowing before changing code
 
 **Semantic colours only.** Components use `bg-surface`, `text-fg-muted`. Reaching

@@ -18,6 +18,7 @@ import { Alert } from '@/components/ui/feedback';
 import { MediaCarousel } from '@/components/ui/media-carousel';
 import { HashtagList } from '@/components/ui/rich-text';
 import { relativeTime } from '@/lib/format';
+import { isCompanyVerified } from '@/lib/verification';
 import {
   applicationsApi,
   listingsApi,
@@ -101,7 +102,7 @@ export function RoleDetailScreen() {
             src={company?.logoUrl}
             size="lg"
             shape="rounded"
-            verified={company?.verificationStatus === 'verified'}
+            verified={isCompanyVerified(company)}
           />
           <div className="min-w-0 flex-1">
             <h1 className="text-xl leading-tight font-bold text-balance">{listing.title}</h1>
@@ -134,7 +135,7 @@ export function RoleDetailScreen() {
             estate rather than a small tick. Its absence is stated too. */}
         {company && (
           <div className="mt-4 flex items-center gap-2 rounded-xl border border-border-subtle bg-surface-sunken px-3.5 py-2.5">
-            {company.verificationStatus === 'verified' ? (
+            {isCompanyVerified(company) ? (
               <>
                 <BadgeCheck aria-hidden="true" className="size-4.5 shrink-0 text-success" />
                 <p className="text-sm text-fg-muted">

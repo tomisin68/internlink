@@ -5,6 +5,7 @@ import type { Account } from '@internlink/shared-types';
 import { Avatar } from '@/components/ui/avatar';
 import { ImageLightbox } from '@/components/ui/media-lightbox';
 import { cn } from '@/lib/cn';
+import { isAccountVerified } from '@/lib/verification';
 import { uploadDocument } from '@/lib/cloudinary';
 import { useUploadsAvailable } from '@/hooks/use-uploads-available';
 import { profileApiClient, queryKeys } from '@/lib/api-endpoints';
@@ -138,7 +139,7 @@ export function ProfileHeaderEditor({ account }: { account: Account }) {
                   name={account.displayName}
                   src={account.photoUrl}
                   size="lg"
-                  verified={account.verificationTiers.length > 0}
+                  verified={isAccountVerified(account)}
                 />
               </button>
 

@@ -18,6 +18,7 @@ import { Button } from '@/components/ui/button';
 import { Field, Input, Select, Textarea } from '@/components/ui/field';
 import { EmptyState, LoadingScreen } from '@/components/ui/feedback';
 import { cn } from '@/lib/cn';
+import { isCompanyVerified } from '@/lib/verification';
 import { compactCount, relativeTime } from '@/lib/format';
 import { companiesApi, networkApi, queryKeys } from '@/lib/api-endpoints';
 import { toast } from '@/lib/stores';
@@ -69,7 +70,7 @@ export function CompanyScreen() {
   }
 
   const { company, canEdit } = data;
-  const isVerified = company.verificationStatus === 'verified';
+  const isVerified = isCompanyVerified(company);
 
   return (
     <div className="mx-auto w-full max-w-2xl px-4 py-6 sm:px-0">
