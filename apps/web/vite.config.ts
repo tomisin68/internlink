@@ -12,6 +12,20 @@ export default defineConfig(({ mode }) => {
       react(),
       tailwindcss(),
       VitePWA({
+        /**
+         * `injectManifest`, not `generateSW` — see the header of src/sw.js.
+         *
+         * The generated worker registered our push handlers from inside an AMD
+         * factory that runs a microtask late, via a runtime
+         * `importScripts('/push-sw.js')`. Post-evaluation `importScripts` throws
+         * in WebKit, so on iOS the `push` listener never existed and a
+         * notification arriving while the app was closed had nothing to handle
+         * it. Owning the worker means the listeners are registered
+         * synchronously, in the first pass, before anything else.
+         */
+        strategies: 'injectManifest',
+        srcDir: 'src',
+        filename: 'sw.js',
         registerType: 'prompt',
         // `prompt` over `autoUpdate` on purpose: silently swapping the bundle
         // under someone who is halfway through the profile wizard loses their
@@ -56,83 +70,21 @@ export default defineConfig(({ mode }) => {
             { name: 'My applications', short_name: 'Applications', url: '/applications' },
           ],
         },
-        workbox: {
-          /**
-           * Push handling is bolted onto the generated worker rather than
-           * replacing it.
-           *
-           * `injectManifest` would let us own the whole file, but then every
-           * runtime route below would have to be hand-written. Importing our
-           * script keeps Workbox doing precaching and caching while push-sw.js
-           * adds the notification handlers. It has to be one worker: FCM's
-           * default `firebase-messaging-sw.js` would be a second registration
-           * at the same scope, and whichever landed last would win.
-           */
-          importScripts: ['/push-sw.js'],
+        injectManifest: {
           globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
-          cleanupOutdatedCaches: true,
-          navigateFallback: '/index.html',
-          // Never let the SW serve a cached shell for API calls — a stale
-          // session payload is worse than an offline error.
-          navigateFallbackDenylist: [/^\/api\//],
-          runtimeCaching: [
-            {
-              // Google Fonts stylesheets change rarely; the files never change.
-              urlPattern: /^https:\/\/fonts\.googleapis\.com\//,
-              handler: 'StaleWhileRevalidate',
-              options: { cacheName: 'google-fonts-stylesheets' },
-            },
-            {
-              urlPattern: /^https:\/\/fonts\.gstatic\.com\//,
-              handler: 'CacheFirst',
-              options: {
-                cacheName: 'google-fonts-files',
-                expiration: { maxEntries: 20, maxAgeSeconds: 60 * 60 * 24 * 365 },
-                cacheableResponse: { statuses: [0, 200] },
-              },
-            },
-            {
-              /**
-               * Cloudinary stills — immutable per URL, safe to cache hard.
-               *
-               * Video is excluded, and has to be. A `<video>` fetches with Range
-               * requests, but `caches.match()` ignores the Range header: every
-               * request after the first is answered with the whole cached body,
-               * which for cross-origin media is opaque and cannot be sliced. The
-               * browser reads that as a server with no range support and ends up
-               * with nothing seekable — so the clip streams once, front to back,
-               * and then can never rewind. `loop` stops looping and pressing play
-               * does nothing, because both of those seek back to the start.
-               *
-               * Workbox has RangeRequestsPlugin for this, but it needs a readable
-               * CORS response to slice, and a 100MB clip has no business in a
-               * 200-entry cache regardless. Video goes to the network.
-               */
-              urlPattern: ({ url }) =>
-                url.origin === 'https://res.cloudinary.com' &&
-                !url.pathname.includes('/video/'),
-              handler: 'CacheFirst',
-              options: {
-                cacheName: 'cloudinary-media',
-                expiration: { maxEntries: 200, maxAgeSeconds: 60 * 60 * 24 * 30 },
-                cacheableResponse: { statuses: [0, 200] },
-              },
-            },
-            {
-              // Listing reads are safe to show stale for a moment while the
-              // network catches up. Auth and writes are NOT cached at all.
-              urlPattern: ({ url, request }) =>
-                request.method === 'GET' && /\/v1\/listings/.test(url.pathname),
-              handler: 'NetworkFirst',
-              options: {
-                cacheName: 'api-listings',
-                networkTimeoutSeconds: 4,
-                expiration: { maxEntries: 60, maxAgeSeconds: 60 * 10 },
-                cacheableResponse: { statuses: [200] },
-              },
-            },
-          ],
+          /**
+           * `iife`, not the plugin's `es` default.
+           *
+           * The registration call uses `{ type: 'classic' }`, and a classic
+           * worker cannot evaluate an ES module. Rollup's `es` output happens to
+           * work while every dependency is inlined — the moment one is not, the
+           * worker fails to parse and push dies silently. `iife` cannot drift
+           * that way, and a service worker has no reason to be a module.
+           */
+          rollupFormat: 'iife',
         },
+        // Runtime caching lives in src/sw.js now — the `workbox` block only
+        // applies to the generated worker this no longer uses.
         devOptions: {
           // Keep the SW off in `vite dev` — an aggressively cached shell during
           // development is a reliable way to waste an afternoon.

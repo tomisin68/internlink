@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { deleteToken, getMessaging, getToken, isSupported, onMessage } from 'firebase/messaging';
+import { deleteToken, getMessaging, getToken, isSupported } from 'firebase/messaging';
 import { firebaseApp, isFirebaseConfigured } from '@/lib/firebase';
 import { pushApi } from '@/lib/api-endpoints';
 import { isIosDevice, isStandalone } from '@/lib/pwa';
+import { onSwMessage } from '@/lib/sw-bridge';
 import { useSession } from '@/features/auth/use-auth';
 import { toast } from '@/lib/stores';
 
@@ -20,14 +21,28 @@ const DISABLED_STORAGE_KEY = 'internlink.push.disabled';
 const SW_READY_TIMEOUT_MS = 8000;
 
 /**
- * Two pieces of module state, because both facts are per *device*, not per
- * component instance — and this hook is now mounted more than once at a time
- * (the prompt in the shell, the switch in settings). Kept as refs they would
- * duplicate: two foreground subscriptions means every message toasts twice,
- * and two sync effects means two identical writes on every load.
+ * How stale this device's server-side registration may get before a foreground
+ * re-syncs it.
+ *
+ * Half an hour is a compromise between two costs. Too eager and every tab
+ * switch is a write. Too lazy and a token FCM has quietly rotated stays broken
+ * for the rest of the session — and a broken token is invisible: the switch
+ * still reads "on", the browser still reports permission granted, and the only
+ * symptom is notifications that never arrive.
+ */
+const RESYNC_AFTER_MS = 30 * 60 * 1000;
+
+/**
+ * Module state, because these facts are per *device*, not per component
+ * instance — and this hook is mounted more than once at a time (the prompt in
+ * the shell, the switch in settings). Kept as refs they would duplicate: two
+ * foreground subscriptions means every message toasts twice, and two sync
+ * effects means two identical writes on every load.
  */
 let foregroundOwner: symbol | null = null;
 let syncedAccountId: string | null = null;
+let lastSyncAt = 0;
+let syncInFlight: Promise<void> | null = null;
 
 export type PushState =
   /**
@@ -78,6 +93,69 @@ async function issueToken(vapidKey: string): Promise<string | null> {
     vapidKey,
     serviceWorkerRegistration: registration,
   });
+}
+
+/**
+ * Re-mints this device's token and hands it to the server.
+ *
+ * Registration used to happen exactly once, the moment someone tapped "Turn
+ * on", and then never again for the life of the install. Four things rotted
+ * quietly because of that, and every one of them presents identically — a
+ * device that says notifications are on and receives nothing:
+ *
+ *  - FCM rotates tokens. The rotated token is a dead row on our side.
+ *  - The browser rotates the underlying push subscription, which invalidates the
+ *    token even when FCM has not touched it. `pushsubscriptionchange` in the
+ *    worker now reports this the moment it happens.
+ *  - `sendToAccounts` prunes tokens FCM reports as gone, and nothing ever put
+ *    them back. One bad delivery window turned push off permanently.
+ *  - The token document is keyed by the token and stamped with an accountId, so
+ *    on a shared browser it kept belonging to whoever first enabled it.
+ *
+ * Cheap enough to run on load, on every foreground after `RESYNC_AFTER_MS`, and
+ * immediately on a subscription change: one `getToken` (which no-ops into cache
+ * when nothing has moved) and one small write.
+ */
+async function syncToken(vapidKey: string, accountId: string, force: boolean): Promise<void> {
+  if (!force && syncedAccountId === accountId && Date.now() - lastSyncAt < RESYNC_AFTER_MS) return;
+  // Coalesced: a visibility change landing on top of an in-flight sync would
+  // otherwise mint the same token twice and race two writes at the same doc.
+  if (syncInFlight) return syncInFlight;
+
+  syncInFlight = (async () => {
+    try {
+      if (force) {
+        // The old registration is known-bad, and `getToken` will happily hand
+        // back its cached copy. Dropping it first is what makes this a refresh
+        // rather than a no-op.
+        await deleteToken(getMessaging(firebaseApp())).catch(() => undefined);
+      }
+
+      const token = await issueToken(vapidKey);
+      if (!token) return;
+
+      await pushApi.register({
+        token,
+        platform: 'web',
+        userAgent: navigator.userAgent.slice(0, 400),
+      });
+
+      localStorage.setItem(STORAGE_KEY, token);
+      localStorage.removeItem(DISABLED_STORAGE_KEY);
+      syncedAccountId = accountId;
+      lastSyncAt = Date.now();
+    } catch {
+      // Silent by design. This is background upkeep nobody asked for; the
+      // explicit toggle reports its own failures loudly. Release the claim so
+      // the next foreground retries rather than assuming it is done.
+      syncedAccountId = null;
+      lastSyncAt = 0;
+    } finally {
+      syncInFlight = null;
+    }
+  })();
+
+  return syncInFlight;
 }
 
 /**
@@ -186,53 +264,50 @@ export function usePushNotifications(): {
   /**
    * Keeps the server's copy of this device's token current.
    *
-   * Registration used to happen exactly once — the moment someone tapped "Turn
-   * on" — and never again. Three things rotted quietly because of that:
-   *
-   *  - FCM rotates tokens. A rotated token is a dead row on our side, while the
-   *    device still reports itself as "on" and receives nothing.
-   *  - `sendToAccounts` prunes tokens FCM reports as gone, and nothing ever put
-   *    them back. One bad delivery window turned push off permanently.
-   *  - The token document is keyed by the token and stamped with an accountId,
-   *    so on a shared browser it kept belonging to whoever first enabled it.
-   *    The next person to sign in got nothing, and the first person's messages
-   *    kept buzzing a device that was no longer theirs.
-   *
-   * Re-registering on load, and again whenever the signed-in account changes,
-   * fixes all three for the cost of one write.
+   * Three triggers, because a token can go bad at three different moments: on
+   * load and account change (the old behaviour), whenever the app returns to
+   * the foreground after a gap, and the instant the worker reports the browser
+   * rotating the subscription out from under us. See `syncToken`.
    */
   useEffect(() => {
     if (state !== 'on' || !accountId || !vapidKey) return;
-    if (syncedAccountId === accountId) return;
-    syncedAccountId = accountId;
 
-    void (async () => {
-      try {
-        const token = await issueToken(vapidKey);
-        if (!token) return;
+    void syncToken(vapidKey, accountId, false);
 
-      await pushApi.register({
-        token,
-        platform: 'web',
-        userAgent: navigator.userAgent.slice(0, 400),
-      });
-      localStorage.setItem(STORAGE_KEY, token);
-      localStorage.removeItem(DISABLED_STORAGE_KEY);
-    } catch {
-        // Silent by design. This is background upkeep nobody asked for; the
-        // explicit toggle below still reports its own failures loudly. Release
-        // the claim so the next mount retries rather than assuming it is done.
-        syncedAccountId = null;
-      }
-    })();
+    const onVisible = (): void => {
+      if (document.visibilityState !== 'visible') return;
+      void syncToken(vapidKey, accountId, false);
+    };
+
+    // `pushsubscriptionchange` is the one case worth forcing a fresh token for:
+    // the existing one is known dead, so honouring the interval would leave the
+    // device silent for up to half an hour for no reason.
+    const offMessage = onSwMessage((message) => {
+      if (message.type === 'pushsubscriptionchange') void syncToken(vapidKey, accountId, true);
+    });
+
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('online', onVisible);
+
+    return () => {
+      offMessage();
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('online', onVisible);
+    };
   }, [state, accountId, vapidKey]);
 
   /**
-   * Foreground messages.
+   * Foreground notifications.
    *
-   * FCM does not show a notification while the tab is focused — by design,
-   * since the user is already looking at the app. Surfacing it as a toast keeps
-   * the behaviour consistent without a second system-level popup.
+   * The worker shows a system notification for every push, including while a
+   * tab is focused — a push handler that shows nothing is a spec violation that
+   * gets the subscription revoked. The toast is the in-app echo of that, so the
+   * event is visible to someone already reading the page rather than only in the
+   * OS tray behind the window.
+   *
+   * This used to be wired to `onMessage` from `firebase/messaging`, which never
+   * fired once: that API is a bridge from FCM's own `firebase-messaging-sw.js`,
+   * and we ship our own worker instead. Ours posts the message directly.
    */
   const listenerId = useRef<symbol | null>(null);
   listenerId.current ??= Symbol('push-foreground');
@@ -246,21 +321,14 @@ export function usePushNotifications(): {
     if (foregroundOwner && foregroundOwner !== id) return;
     foregroundOwner = id;
 
-    let cancelled = false;
-    let unsubscribe: (() => void) | undefined;
-
-    void (async () => {
-      if (!(await isSupported().catch(() => false))) return;
-      if (cancelled) return;
-      unsubscribe = onMessage(getMessaging(firebaseApp()), (payload) => {
-        const data = payload.data ?? {};
-        if (data.title) toast.success(data.title, data.body);
-      });
-    })();
+    const off = onSwMessage((message) => {
+      if (message.type !== 'push') return;
+      if (document.visibilityState !== 'visible') return;
+      toast.success(message.payload.title, message.payload.body);
+    });
 
     return () => {
-      cancelled = true;
-      unsubscribe?.();
+      off();
       if (foregroundOwner === id) foregroundOwner = null;
     };
   }, [state]);
@@ -302,6 +370,7 @@ export function usePushNotifications(): {
       localStorage.setItem(STORAGE_KEY, token);
       localStorage.removeItem(DISABLED_STORAGE_KEY);
       syncedAccountId = accountId;
+      lastSyncAt = Date.now();
       setState('on');
       toast.success('Notifications are on', 'We will let you know when a message arrives.');
     } catch (error) {
@@ -318,6 +387,7 @@ export function usePushNotifications(): {
     localStorage.removeItem(STORAGE_KEY);
     localStorage.setItem(DISABLED_STORAGE_KEY, 'true');
     syncedAccountId = null;
+    lastSyncAt = 0;
     setState('off');
 
     // Deleting the FCM token first means the browser stops receiving even if

@@ -6,6 +6,7 @@ import { Toaster } from './components/ui/toaster';
 import { PwaUpdatePrompt } from './components/layout/pwa-update-prompt';
 import { Alert } from './components/ui/feedback';
 import { useSessionBootstrap } from './features/auth/use-auth';
+import { useServiceWorkerNavigation } from './hooks/use-sw-navigation';
 import { watchSystemTheme } from './lib/stores';
 import { ApiRequestError, NetworkError } from './lib/api-client';
 import { isFirebaseConfigured } from './lib/firebase';
@@ -35,6 +36,7 @@ const queryClient = new QueryClient({
 
 function AppShell() {
   useSessionBootstrap();
+  useServiceWorkerNavigation();
 
   useEffect(() => watchSystemTheme(), []);
 

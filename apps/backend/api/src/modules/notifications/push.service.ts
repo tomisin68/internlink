@@ -38,24 +38,56 @@ export interface PushPayload {
   imageUrl?: string | null;
   /** Collapses same-subject notifications instead of stacking them. */
   tag?: string;
+  /**
+   * Delivery priority, as the Web Push `Urgency` header.
+   *
+   * This is not a nicety. A phone on a metered or dozing connection defers
+   * `normal` traffic — on iOS that can mean a message notification arriving
+   * with the next wake-up rather than now, which for a chat is the same as not
+   * arriving. `high` is for the handful of events a person is actually waiting
+   * on; everything else stays `normal` so it does not compete with them.
+   */
+  urgency?: 'normal' | 'high';
+  /**
+   * How long the push service should hold this if the device is offline.
+   *
+   * Defaults to a day: "someone liked your post" is worthless by then. A direct
+   * message is not, so those ask for longer.
+   */
+  ttlSeconds?: number;
 }
+
+/** A day. Long enough to survive a night with the phone off, short enough to stay relevant. */
+const DEFAULT_TTL_SECONDS = 86_400;
 
 export async function registerToken(accountId: string, input: PushTokenInput): Promise<void> {
   // Keyed by the token, not by account: the same browser re-registering must
   // update one document rather than accumulate a row per sign-in. It also means
   // a token that moves to a different account (shared laptop) is reassigned
   // rather than duplicated, so the previous owner stops receiving it.
-  await db()
-    .collection(Collections.pushTokens)
-    .doc(hashToken(input.token))
-    .set({
-      accountId,
-      token: input.token,
-      platform: input.platform,
-      userAgent: input.userAgent ?? null,
-      createdAt: nowIso(),
-      lastSeenAt: nowIso(),
-    });
+  const ref = db().collection(Collections.pushTokens).doc(hashToken(input.token));
+
+  // A transaction rather than a plain `set`, now that the client re-registers on
+  // every foreground: a blind overwrite would reset `createdAt` on each one, and
+  // "when did this device first turn notifications on" is the field you want
+  // when a user reports they stopped arriving.
+  await db().runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    const now = nowIso();
+
+    tx.set(
+      ref,
+      {
+        accountId,
+        token: input.token,
+        platform: input.platform,
+        userAgent: input.userAgent ?? null,
+        createdAt: snap.exists ? (snap.data()?.createdAt ?? now) : now,
+        lastSeenAt: now,
+      },
+      { merge: true },
+    );
+  });
 }
 
 export async function unregisterToken(token: string): Promise<void> {
@@ -144,10 +176,8 @@ export async function sendToAccounts(
         webpush: {
           fcmOptions: { link: `${env.WEB_APP_ORIGIN}${payload.path}` },
           headers: {
-            // Drop rather than queue if the device has been offline a day —
-            // "someone posted" is worthless by then.
-            TTL: '86400',
-            Urgency: 'normal',
+            TTL: String(payload.ttlSeconds ?? DEFAULT_TTL_SECONDS),
+            Urgency: payload.urgency ?? 'normal',
           },
         },
       });

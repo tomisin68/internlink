@@ -1,17 +1,18 @@
 /* eslint-disable no-undef */
 /**
- * Push handling, imported into the generated Workbox service worker.
+ * LEGACY. Nothing in the current build imports this file — push handling now
+ * lives in src/sw.js, which the browser evaluates directly.
  *
- * A browser allows one service worker per scope, so this cannot be a separate
- * `firebase-messaging-sw.js` — that would be a second registration at the same
- * scope and whichever landed last would win, silently breaking either offline
- * support or push depending on the order. `workbox.importScripts` in
- * vite.config.ts pulls this into the one worker we already have.
+ * It stays deployed for the workers already installed on people's devices. Those
+ * were generated with `importScripts('/push-sw.js')` baked in, and they keep
+ * re-running it on every restart until they pick up the new worker. Deleting the
+ * file would not 404 — Hosting rewrites unmatched paths to the SPA shell, so
+ * they would import HTML and fail to start at all, taking the update check down
+ * with them. Serving the old handler for one more cycle costs 2KB and means
+ * those devices keep receiving notifications right up to the moment they
+ * upgrade.
  *
- * The server sends `data`-only messages (see push.service.ts). With a
- * `notification` payload the browser renders its own toast *and* fires this
- * handler, so the user gets two. Owning the display here keeps it to one and
- * lets us set the icon, the tag and where a tap lands.
+ * Safe to delete once the old workers have aged out.
  */
 
 self.addEventListener('push', (event) => {

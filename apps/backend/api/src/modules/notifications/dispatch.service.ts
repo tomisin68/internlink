@@ -92,17 +92,27 @@ const COMPOSERS: Partial<Record<NotificationType, Composer>> = {
     path: '/network',
     tag: 'connection-accepted',
   }),
+  /**
+   * Messages are the one event people genuinely wait on, so they are the one
+   * event that asks the push service to deliver now rather than at the device's
+   * convenience — and to hold on for three days rather than one, because an
+   * unread message is still worth reading on Monday.
+   */
   message_received: ({ actorName, preview, payload }) => ({
     title: `${actorName} sent you a message`,
     body: preview || 'Open the conversation.',
     path: `/messages/${payload.threadId as string}`,
     tag: `thread:${payload.threadId as string}`,
+    urgency: 'high',
+    ttlSeconds: 259_200,
   }),
   message_request: ({ actorName, payload }) => ({
     title: `${actorName} sent a message request`,
     body: 'Accept it to start the conversation.',
     path: `/messages/${payload.threadId as string}`,
     tag: `thread:${payload.threadId as string}`,
+    urgency: 'high',
+    ttlSeconds: 259_200,
   }),
   application_received: ({ actorName, preview }) => ({
     title: 'New applicant',
@@ -116,11 +126,15 @@ const COMPOSERS: Partial<Record<NotificationType, Composer>> = {
     path: '/applications',
     tag: 'application-status',
   }),
+  // Time-sensitive by definition — an interview notice that lands late is worse
+  // than useless, because the person has already missed it.
   interview_scheduled: ({ preview }) => ({
     title: 'Interview scheduled',
     body: preview || 'Check your applications for the details.',
     path: '/applications',
     tag: 'interview',
+    urgency: 'high',
+    ttlSeconds: 259_200,
   }),
 
   // Deliberately durable-only. A profile view is interesting to scroll past and
